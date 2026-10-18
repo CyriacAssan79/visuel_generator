@@ -261,7 +261,7 @@ with tab_check:
 
         left, right = st.columns([1, 1])
         show_image(left, render["file_path"])
-        # Seul ce qui demande une action est affiché ; les contrôles conformes restent repliés.
+        # Seul ce qui demande une action est affiché ; les contrôles conformes restent repliés
         to_review = [c for c in checks if c["status"] != "conforme"]
         passed = [c for c in checks if c["status"] == "conforme"]
         anomalies = sum(c["status"] == "anomalie" for c in checks)
