@@ -1,0 +1,24 @@
+streamlit==1.66.0
+pydantic==2.14.1
+pillow==12.3.0
+pymupdf==1.28.2
+pyyaml
+numpy
+pytest
+psutil
+# Génération IA locale
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+diffusers==0.41.0
+transformers==5.19.0
+huggingface-hub>=1.32,<2
+accelerate
+safetensors
+# Accélération Intel (puce graphique Iris Xe) — ne pas installer optimum-intel : conflit avec diffusers
+openvino==2026.4.1
+openvino-genai==2026.4.1.0
+# Traduction locale français → anglais des descriptions de scène (MarianMT Helsinki-NLP/opus-mt-fr-en)
+sentencepiece
+sacremoses
+# Contrôles : OCR (EasyOCR, installe aussi OpenCV utilisé pour la détection de visages)
+easyocr==1.7.2

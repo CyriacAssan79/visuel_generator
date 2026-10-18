@@ -1,0 +1,34 @@
+{
+  "model": "sd15_ov_int8",
+  "repo": "OpenVINO/stable-diffusion-v1-5-int8-ov",
+  "licence": "CreativeML OpenRAIL-M",
+  "date": "20261018_022722",
+  "params": {
+    "steps": 20,
+    "size": 512,
+    "seed": 42,
+    "prompt": "interior of a home improvement store, aisles with shelves of tools and paint, wide angle, natural light, realistic photo, clean composition, empty space at the top",
+    "negative": "text, letters, logo, watermark, signage, people, blurry, distorted",
+    "engine": "openvino",
+    "device": "GPU"
+  },
+  "machine": {
+    "cpu": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "cores_logical": 12,
+    "ram_total_gb": 15.7,
+    "ram_free_at_start_gb": 6.7
+  },
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "diffusers": "0.41.0",
+    "openvino": "2026.4.1-22982-e213a147257-releases/2026/4",
+    "openvino_genai": "2026.4.1.0-3408-ab01d1771e4"
+  },
+  "download_and_files_s": 92.9,
+  "load_s": 219.8,
+  "generate_first_s": 62.2,
+  "generate_s": 42.9,
+  "peak_rss_gb": 5.53,
+  "image": "sd15_ov_int8_gpu_20261018_022722.png",
+  "status": "ok"
+}

@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# KÔMIAN — moteur de génération visuelle
+# Versionné : code, docs, configuration, profils de marque, logos officiels, polices,
+# modèle YuNet (232 Ko) et résultats de benchmark.
+# Ignoré : données produites à l'usage, ressources régénérables, caches et secrets.
+# ---------------------------------------------------------------------------
+
+# --- Données d'exécution (propres à chaque poste) --------------------------
+# Base SQLite, journaux et sauvegardes (komian.sqlite3.avant_migration, .avant_synchro_*)
+data/db/
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.*
+# Rendus en cours, en attente de validation et exports approuvés
+data/renders/
+data/exports/
+# Photos importées par le studio (droits d'usage propres à chaque campagne)
+data/sources/*/uploads/
+
+# --- Ressources de marque ---------------------------------------------------
+# Logo blanc dérivé automatiquement du logo officiel (régénéré au chargement du profil)
+data/brands/*/logos/*_derive.png
+# Visuels livrés au client, servant de références : confidentiels, non utilisés par le code
+data/brands/*/references/
+# Chartes sources (PDF clients)
+data/sources/*/*.pdf
+
+# --- Modèles et caches d'IA ---------------------------------------------------
+# Les modèles se téléchargent au premier usage (~/.cache/huggingface, ~/.EasyOCR)
+data/models/ov_cache/
+*.blob
+*.cl_cache
+# Journal du compilateur de la puce graphique Intel (créé par OpenVINO en cas d'erreur de noyau)
+kernel.errors.txt
+# Poids de modèles déposés par erreur dans le projet (le modèle YuNet .onnx reste versionné)
+*.safetensors
+*.bin
+*.ckpt
+*.pt
+*.pth
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# --- Environnements virtuels (le projet utilise conda « generation_visuel ») --
+.venv/
+venv/
+env/
+.conda/
+
+# --- Streamlit, secrets et configuration locale --------------------------------
+.streamlit/secrets.toml
+.env
+.env.*
+
+# --- Éditeurs et systèmes ---------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+*:Zone.Identifier

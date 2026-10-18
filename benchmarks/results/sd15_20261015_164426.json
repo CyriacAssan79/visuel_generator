@@ -1,0 +1,30 @@
+{
+  "model": "sd15",
+  "repo": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+  "licence": "CreativeML OpenRAIL-M",
+  "date": "20261015_164426",
+  "params": {
+    "steps": 20,
+    "size": 512,
+    "seed": 42,
+    "prompt": "interior of a home improvement store, aisles with shelves of tools and paint, wide angle, natural light, realistic photo, clean composition, empty space at the top",
+    "negative": "text, letters, logo, watermark, signage, people, blurry, distorted",
+    "dtype": "float32",
+    "device": "cpu"
+  },
+  "machine": {
+    "cpu": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "cores_logical": 12,
+    "ram_total_gb": 15.7,
+    "ram_free_at_start_gb": 2.3
+  },
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "diffusers": "0.41.0"
+  },
+  "load_s": 98.3,
+  "generate_s": 339.2,
+  "peak_rss_gb": 5.89,
+  "image": "sd15_20261015_164426.png",
+  "status": "ok"
+}

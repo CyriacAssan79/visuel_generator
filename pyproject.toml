@@ -1,0 +1,9 @@
+[project]
+name = "komian-moteur-visuel"
+version = "0.1.0"
+description = "Moteur de génération visuelle KÔMIAN (MVP)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,48 @@
+# Moteur IA local. `active` désigne le modèle utilisé par défaut ; `choices` ceux proposés dans l'application.
+# Chaque modèle a été mesuré sur cette machine (benchmarks/results/, 2026-10-15 et 2026-10-18).
+#   engine : « diffusers » (PyTorch, processeur) ou « openvino » (accélération Intel)
+#   device : CPU (processeur) ou GPU (puce graphique Intel Iris Xe) pour OpenVINO
+#   expected_s : temps mesuré par scène en régime établi
+active: lcm_ov_gpu
+choices: [lcm_ov_gpu, sd15_ov_int8_gpu]
+models:
+  lcm_ov_gpu:
+    label: "Rapide : LCM Dreamshaper v7 (≈ 6 s, image plus douce)"
+    repo: "OpenVINO/LCM_Dreamshaper_v7-int8-ov"
+    engine: openvino
+    device: GPU
+    lcm: true
+    licence: "MIT"
+    steps: 6
+    guidance_scale: 8.0
+    base_size: 512
+    expected_s: 6
+  sd15_ov_int8_gpu:
+    label: "Qualité : Stable Diffusion 1.5 (≈ 43 s)"
+    repo: "OpenVINO/stable-diffusion-v1-5-int8-ov"
+    engine: openvino
+    device: GPU
+    licence: "CreativeML OpenRAIL-M"
+    steps: 20
+    guidance_scale: 7.5
+    base_size: 512
+    expected_s: 43
+  sd15_ov_gpu:
+    label: "Stable Diffusion 1.5 fp16 (≈ 53 s)"
+    repo: "OpenVINO/stable-diffusion-v1-5-fp16-ov"
+    engine: openvino
+    device: GPU
+    licence: "CreativeML OpenRAIL-M"
+    steps: 20
+    guidance_scale: 7.5
+    base_size: 512
+    expected_s: 53
+  sd15:
+    label: "Stable Diffusion 1.5 sans accélération (≈ 339 s)"
+    repo: "stable-diffusion-v1-5/stable-diffusion-v1-5"
+    engine: diffusers
+    pipeline: "StableDiffusionPipeline"
+    licence: "CreativeML OpenRAIL-M"
+    steps: 20
+    base_size: 512
+    expected_s: 339

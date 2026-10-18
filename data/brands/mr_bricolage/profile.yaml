@@ -1,0 +1,78 @@
+# Profil extrait de « 2017.09.11 Guide d'utilisation Charte Graphique »
+# et des visuels de référence fournis (marché Côte d'Ivoire).
+brand_id: mr_bricolage
+brand_name: "Mr.Bricolage"
+source_document: "2017.09.11 Guide d'utilisation Charte Graphique"
+source_version_status: "à confirmer"
+
+official_spelling: "Mr.Bricolage"
+# Variantes explicitement barrées dans le guide (p. 6)
+forbidden_spellings:
+  - "MR.BRICOLAGE"
+  - "Monsieur Bricolage"
+  - "MR.Bricolage"
+  - "MONSIEUR BRICOLAGE"
+  - "Mr-Bricolage"
+  - "Mr Bricolage"
+internal_only_abbreviations: ["Mr.B", "MBSA"]
+
+logos:
+  - id: officiel_rouge
+    file: logos/logo_officiel_rouge.png
+    description: "Logotype commercial, rouge et point vert, fond transparent (fourni par le studio)"
+    status: "confirmé"
+  - id: blanc_derive
+    file: logos/logo_blanc_derive.png
+    description: "Version blanche dérivée automatiquement du logo rouge (point vert conservé), pour fonds rouges"
+    status: "dérivé"
+    on_dark_background: true
+
+fonts:
+  light: fonts/Ubuntu-Light.ttf
+  regular: fonts/Ubuntu-Regular.ttf
+  medium: fonts/Ubuntu-Medium.ttf
+  bold: fonts/Ubuntu-Bold.ttf
+  italic: fonts/Ubuntu-Italic.ttf
+  bold_italic: fonts/Ubuntu-BoldItalic.ttf
+
+primary_colors:
+  rouge: {name: rouge, hex: "#EB0029", rgb: [235, 0, 41], pantone: "185 C", cmyk: [0, 100, 80, 0]}
+  vert: {name: vert, hex: "#00AA3F", rgb: [0, 170, 63], pantone: "354 C", cmyk: [82, 0, 90, 0]}
+  gris_sombre: {name: gris_sombre, hex: "#696767", rgb: [105, 103, 103], pantone: "426 C", cmyk: [54, 45, 44, 31]}
+primary_color_rule: "Couleurs principales utilisées à 100 % : ni tramées, ni dégradées."
+
+# Texte courant en noir, comme dans les exemples de la charte (p. 21 à 25) et les visuels livrés.
+neutral_colors:
+  noir: {name: noir, hex: "#000000", rgb: [0, 0, 0]}
+
+# Étiquettes de série relevées sur les visuels livrés : bloc rouge puis bloc vert (gras italique).
+series_tags:
+  "Lundi motivation": ["Lundi", "MOTIVATION"]
+
+secondary_colors_status: "à confirmer"
+secondary_colors:
+  - {name: orange, hex: "#FA9619", rgb: [250, 150, 25], status: "à confirmer"}
+  - {name: anis, hex: "#C8DC0A", rgb: [200, 220, 10], status: "à confirmer"}
+  - {name: violet, hex: "#A050A5", rgb: [160, 80, 165], status: "à confirmer"}
+  - {name: vert_clair, hex: "#82D700", rgb: [130, 215, 0], status: "à confirmer"}
+  - {name: bleu_nuit, hex: "#373778", rgb: [55, 55, 120], status: "à confirmer"}
+  - {name: bleu_ciel, hex: "#7396FA", rgb: [115, 150, 250], status: "à confirmer"}
+
+local_market:
+  market: "Côte d'Ivoire"
+  tagline: "Maison et Jardin"
+  handle: "Mr-bricolage.ci"
+  address: "Riviera 3, face Cap Nord"
+  status: "à confirmer"
+  source: "Relevé sur les visuels de référence ; absent du guide de 2017"
+
+iconography_themes: ["moments de vie", "bricolage", "jardinage", "partage", "détente"]
+
+unknowns:
+  - "Version de la charte applicable au marché ivoirien"
+  - "Fichier officiel du logo « Maison et Jardin » (la mention est recomposée en Ubuntu)"
+  - "Version blanche officielle du logo (actuellement dérivée)"
+  - "Taille minimale, zone de protection et fonds autorisés du logo"
+  - "Couleurs secondaires définitives (guide « WORK IN PROGRESS »)"
+  - "Rouge du logo fourni (≈ 238,1,31) et des visuels livrés (≈ 254,0,2) différent du #EB0029 de la charte"
+  - "Compatibilité des overlays semi-transparents avec la règle des couleurs à 100 %"
