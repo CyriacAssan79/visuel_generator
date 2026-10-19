@@ -98,10 +98,13 @@ class GeometricSource:
                         draw.pieslice((x0, y0, x0 + cw, y0 + ch * 2), 180, 360, fill=ink)
 
 
-# Éléments exclus. Les derniers corrigent l'aspect « personnage de synthèse » (sourire forcé, peau plastique).
-NEGATIVE_PROMPT = ("text, letters, words, logo, watermark, signage, blurry, distorted, deformed hands, cartoon, "
-                   "3d render, cgi, illustration, doll, plastic skin, exaggerated smile, too many teeth, "
-                   "deformed teeth, deformed face, asymmetric eyes")
+# Éléments exclus : texte et logo (ajoutés ensuite), aspect « personnage de synthèse » (sourire forcé, peau
+# plastique), défauts d'anatomie (liste recommandée par l'auteur de Realistic Vision) et nudité : sans tenue
+# précisée, Realistic Vision produit volontiers des personnes torse nu, inacceptable pour une marque.
+# Limite : l'encodeur de texte lit 75 jetons, la suite est ignorée. Liste mesurée à 70 jetons, par priorité.
+NEGATIVE_PROMPT = ("text, letters, logo, watermark, signage, nsfw, nude, shirtless, cartoon, cgi, 3d render, doll, "
+                   "plastic skin, exaggerated smile, too many teeth, deformed face, asymmetric eyes, deformed iris, "
+                   "mutated hands, extra fingers, fused fingers, bad anatomy, extra limbs, blurry, low quality")
 # Les modèles LCM ignorent la liste d'exclusion : le style photographique est alors ajouté à la description.
 LCM_PHOTO_STYLE = "candid photo, 35mm photograph, natural skin texture, natural expression"
 
@@ -168,19 +171,35 @@ def _release_loaded() -> None:
     gc.collect()
 
 
-def _openvino_pipeline(repo: str, device: str, width: int, height: int, guidance: float):
+def _openvino_model_dir(spec: dict) -> Path:
+    """Dossier du modèle : converti sur la machine (`path`), sinon téléchargé depuis Hugging Face (`repo`)."""
+    if spec.get("path"):
+        path = Path(spec["path"]).expanduser()
+        if not (path / "model_index.json").is_file():
+            raise SourceUnavailable(f"Modèle non converti sur cette machine ({path}) : lancer "
+                                    f"{spec.get('convert_script', 'le script de conversion')} sous WSL.")
+        return path
+    from huggingface_hub import snapshot_download
+    return Path(snapshot_download(spec["repo"]))
+
+
+def _openvino_pipeline(spec: dict, device: str, width: int, height: int, guidance: float):
     """Pipeline OpenVINO compilé pour une taille fixe (formes statiques = plus rapide), gardé en mémoire.
 
     Le modèle précédent est libéré AVANT de charger le suivant : les deux ensemble dépassent la mémoire
     de la puce graphique intégrée.
     """
-    key = (repo, device, width, height, guidance)
+    scheduler = spec.get("scheduler")
+    key = (spec.get("path") or spec["repo"], scheduler, device, width, height, guidance)
     if key in _LOADED:
         return _LOADED[key]
     _release_loaded()
     import openvino_genai as ov_genai
-    from huggingface_hub import snapshot_download
-    pipe = ov_genai.Text2ImagePipeline(snapshot_download(repo))
+    model_dir = _openvino_model_dir(spec)
+    pipe = ov_genai.Text2ImagePipeline(str(model_dir))
+    if scheduler:  # planificateur recommandé par l'auteur du modèle, à la place de celui du dossier
+        pipe.set_scheduler(ov_genai.Scheduler.from_config(str(model_dir / "scheduler" / "scheduler_config.json"),
+                                                          getattr(ov_genai.Scheduler.Type, scheduler)))
     pipe.reshape(1, height, width, guidance)
     OV_CACHE.mkdir(parents=True, exist_ok=True)
     pipe.compile(device, CACHE_DIR=str(OV_CACHE))
@@ -209,7 +228,7 @@ def generate_scene(spec: dict, prompt: str, width: int, height: int, seed: int) 
         except ImportError as exc:
             raise SourceUnavailable("OpenVINO GenAI n'est pas installé.") from exc
         guidance = spec.get("guidance_scale", 7.5)
-        pipe = _openvino_pipeline(spec["repo"], resolve_device(spec.get("device", "CPU")), width, height, guidance)
+        pipe = _openvino_pipeline(spec, resolve_device(spec.get("device", "CPU")), width, height, guidance)
         call = {"width": width, "height": height, "num_inference_steps": spec["steps"], "rng_seed": seed,
                 "guidance_scale": guidance}
         if not spec.get("lcm"):  # les modèles LCM n'utilisent pas de prompt négatif
@@ -250,7 +269,9 @@ class DiffusionSource:
         device = resolve_device(spec.get("device", "CPU")) if engine == "openvino" else "CPU"
         params.update({"model": key, "repo": spec["repo"], "licence": spec.get("licence"), "engine": engine,
                        "device": device,
-                       "device_requested": spec.get("device", "CPU"), "steps": spec["steps"], "generated_size": [gw, gh],
+                       "device_requested": spec.get("device", "CPU"), "steps": spec["steps"],
+                       "guidance_scale": spec.get("guidance_scale"), "scheduler": spec.get("scheduler"),
+                       "generated_size": [gw, gh],
                        "negative_prompt": None if spec.get("lcm") else NEGATIVE_PROMPT})
         # Description saisie en français ou en anglais : traduite ici, jamais affichée, enregistrée avec le rendu
         prompt_en, translated = translate_prompt(params["prompt"])

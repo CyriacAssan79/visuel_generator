@@ -1,11 +1,13 @@
 """Benchmark des modèles d'images candidats sur la machine cible.
 
-Usage : python benchmarks/bench_models.py sd15 [--steps 20] [--size 512] [--device CPU|GPU]
+Usage : python benchmarks/bench_models.py rv51_ov_int8 [--steps 25] [--size 512] [--device CPU|GPU]
+                                          [--scene ambiance|personne]
 Chaque essai, réussi ou non, est consigné dans benchmarks/results/.
 """
 import argparse
 import json
 import platform
+import sys
 import threading
 import time
 import traceback
@@ -16,27 +18,34 @@ import psutil
 
 RESULTS = Path(__file__).resolve().parent / "results"
 
+# SD 1.5 (sd15, sd15_ov_fp16, sd15_ov_int8) a été retiré le 2026-10-18 au profit de Realistic Vision V5.1 :
+# ses mesures restent dans benchmarks/results/.
 MODELS = {
-    "sd15": {"repo": "stable-diffusion-v1-5/stable-diffusion-v1-5", "pipeline": "StableDiffusionPipeline",
-             "licence": "CreativeML OpenRAIL-M"},
     "sdxl": {"repo": "stabilityai/stable-diffusion-xl-base-1.0", "pipeline": "StableDiffusionXLPipeline",
              "licence": "CreativeML OpenRAIL++-M"},
     "flux_schnell": {"repo": "black-forest-labs/FLUX.1-schnell", "pipeline": "FluxPipeline",
                      "licence": "Apache 2.0"},
     # Versions converties pour OpenVINO (Intel) : processeur ou puce graphique intégrée.
-    "sd15_ov_fp16": {"repo": "OpenVINO/stable-diffusion-v1-5-fp16-ov", "engine": "openvino",
-                     "licence": "CreativeML OpenRAIL-M"},
-    "sd15_ov_int8": {"repo": "OpenVINO/stable-diffusion-v1-5-int8-ov", "engine": "openvino",
-                     "licence": "CreativeML OpenRAIL-M"},
     "lcm_ov_int8": {"repo": "OpenVINO/LCM_Dreamshaper_v7-int8-ov", "engine": "openvino", "lcm": True,
                     "licence": "MIT", "default_steps": 6},
+    # Converti sur la machine par scripts/convert_realistic_vision.sh (pas de version OpenVINO officielle)
+    "rv51_ov_int8": {"repo": "SG161222/Realistic_Vision_V5.1_noVAE", "engine": "openvino",
+                     "path": "~/.cache/komian/models/realistic-vision-v5.1-int8-ov",
+                     "scheduler": "EULER_ANCESTRAL_DISCRETE", "guidance": 5.0,
+                     "licence": "CreativeML OpenRAIL-M", "default_steps": 25},
 }
 OV_CACHE = Path.home() / ".cache" / "komian" / "ov_cache"  # propre à chaque système (Windows / WSL)
 
-# Brief de référence (annexe B) : scène d'ambiance sans personne ni texte.
-PROMPT = ("interior of a home improvement store, aisles with shelves of tools and paint, "
-          "wide angle, natural light, realistic photo, clean composition, empty space at the top")
-NEGATIVE = "text, letters, logo, watermark, signage, people, blurry, distorted"
+SCENES = {
+    # Brief de référence (annexe B) : scène d'ambiance sans personne ni texte.
+    "ambiance": ("interior of a home improvement store, aisles with shelves of tools and paint, "
+                 "wide angle, natural light, realistic photo, clean composition, empty space at the top",
+                 "text, letters, logo, watermark, signage, people, blurry, distorted"),
+    # Gabarit « Lundi motivation » : une personne en plan taille (visage et mains à juger).
+    "personne": ("young Black woman in her twenties, with a gentle natural smile, wearing a white t-shirt and "
+                 "denim overalls, painting a living room wall with a paint roller, bright apartment, medium shot, "
+                 "looking at the camera, warm natural light, candid photo, 35mm photograph", None),
+}
 
 
 class PeakMemory:
@@ -63,11 +72,17 @@ class PeakMemory:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("model", choices=MODELS)
-    parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--steps", type=int, default=None)  # défaut : default_steps du modèle, sinon 20
     parser.add_argument("--device", default="CPU", help="OpenVINO : CPU ou GPU (puce graphique Intel)")
     parser.add_argument("--size", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--scene", choices=SCENES, default="ambiance")
     args = parser.parse_args()
+    prompt, negative = SCENES[args.scene]
+    if negative is None:  # scène avec personne : liste d'exclusion de l'application
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from komian.backgrounds import NEGATIVE_PROMPT
+        negative = NEGATIVE_PROMPT
 
     RESULTS.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -78,8 +93,9 @@ def main():
     vm = psutil.virtual_memory()
     record = {
         "model": args.model, "repo": spec["repo"], "licence": spec["licence"], "date": stamp,
-        "params": {"steps": args.steps, "size": args.size, "seed": args.seed, "prompt": PROMPT,
-                   "negative": None if spec.get("lcm") else NEGATIVE, "engine": engine, "device": device},
+        "params": {"steps": args.steps, "size": args.size, "seed": args.seed, "scene": args.scene, "prompt": prompt,
+                   "negative": None if spec.get("lcm") else negative, "engine": engine, "device": device,
+                   "scheduler": spec.get("scheduler")},
         "machine": {"cpu": platform.processor(), "cores_logical": psutil.cpu_count(),
                     "ram_total_gb": round(vm.total / 2**30, 1), "ram_free_at_start_gb": round(vm.available / 2**30, 1)},
     }
@@ -95,20 +111,23 @@ def main():
                 from huggingface_hub import snapshot_download
                 record["versions"]["openvino"] = openvino.__version__
                 record["versions"]["openvino_genai"] = ov_genai.__version__
-                model_dir = snapshot_download(spec["repo"])
+                model_dir = (Path(spec["path"]).expanduser() if spec.get("path")
+                             else Path(snapshot_download(spec["repo"])))
                 record["download_and_files_s"] = round(time.perf_counter() - t0, 1)
-                guidance = 8.0 if spec.get("lcm") else 7.5
-                pipe = ov_genai.Text2ImagePipeline(model_dir)
+                guidance = spec.get("guidance", 8.0 if spec.get("lcm") else 7.5)
+                record["params"]["guidance"] = guidance
+                pipe = ov_genai.Text2ImagePipeline(str(model_dir))
+                if spec.get("scheduler"):
+                    pipe.set_scheduler(ov_genai.Scheduler.from_config(
+                        str(model_dir / "scheduler" / "scheduler_config.json"),
+                        getattr(ov_genai.Scheduler.Type, spec["scheduler"])))
                 pipe.reshape(1, args.size, args.size, guidance)  # formes statiques : plus rapide
                 pipe.compile(device, CACHE_DIR=str(OV_CACHE))
             else:
                 pipe_cls = getattr(diffusers, spec["pipeline"])
                 kwargs = {"dtype": torch.float32}
-                if args.model in ("sd15", "sdxl"):
+                if args.model == "sdxl":
                     kwargs["variant"] = "fp16"  # poids fp16 téléchargés, calcul en float32 sur CPU
-                if args.model == "sd15":
-                    kwargs["safety_checker"] = None
-                    kwargs["requires_safety_checker"] = False
                 pipe = pipe_cls.from_pretrained(spec["repo"], **kwargs)
             if engine != "openvino":
                 pipe.set_progress_bar_config(disable=True)
@@ -122,10 +141,10 @@ def main():
                     call = {"width": args.size, "height": args.size, "num_inference_steps": args.steps,
                             "rng_seed": args.seed, "guidance_scale": guidance}
                     if not spec.get("lcm"):  # LCM : pas de prompt négatif
-                        call["negative_prompt"] = NEGATIVE
-                    image = Image.fromarray(pipe.generate(PROMPT, **call).data[0])
+                        call["negative_prompt"] = negative
+                    image = Image.fromarray(pipe.generate(prompt, **call).data[0])
                 else:
-                    image = pipe(prompt=PROMPT, negative_prompt=NEGATIVE, num_inference_steps=args.steps,
+                    image = pipe(prompt=prompt, negative_prompt=negative, num_inference_steps=args.steps,
                                  width=args.size, height=args.size,
                                  generator=torch.Generator("cpu").manual_seed(args.seed)).images[0]
                 timings.append(round(time.perf_counter() - t1, 1))

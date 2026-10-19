@@ -1,0 +1,37 @@
+{
+  "model": "rv51_ov_int8",
+  "repo": "SG161222/Realistic_Vision_V5.1_noVAE",
+  "licence": "CreativeML OpenRAIL-M",
+  "date": "20261018_222206",
+  "params": {
+    "steps": 25,
+    "size": 512,
+    "seed": 42,
+    "scene": "personne",
+    "prompt": "young Black woman in her twenties, with a gentle natural smile, wearing a white t-shirt and denim overalls, painting a living room wall with a paint roller, bright apartment, medium shot, looking at the camera, warm natural light, candid photo, 35mm photograph",
+    "negative": "text, letters, logo, watermark, signage, nsfw, nude, shirtless, cartoon, cgi, 3d render, doll, plastic skin, exaggerated smile, too many teeth, deformed face, asymmetric eyes, deformed iris, mutated hands, extra fingers, fused fingers, bad anatomy, extra limbs, blurry, low quality",
+    "engine": "openvino",
+    "device": "GPU",
+    "scheduler": "EULER_ANCESTRAL_DISCRETE",
+    "guidance": 5.0
+  },
+  "machine": {
+    "cpu": "x86_64",
+    "cores_logical": 12,
+    "ram_total_gb": 7.6,
+    "ram_free_at_start_gb": 6.9
+  },
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "diffusers": "0.41.0",
+    "openvino": "2026.4.1-22982-e213a147257-releases/2026/4",
+    "openvino_genai": "2026.4.1.0-3408-ab01d1771e4"
+  },
+  "download_and_files_s": 0.2,
+  "load_s": 12.8,
+  "generate_first_s": 79.7,
+  "generate_s": 57.7,
+  "peak_rss_gb": 1.45,
+  "image": "rv51_ov_int8_gpu_20261018_222206.png",
+  "status": "ok"
+}
