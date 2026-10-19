@@ -210,9 +210,13 @@ def check_logo(comp: Composition, image: Image.Image, brief: Brief, profile: Bra
 
 
 def charter_points(profile: BrandProfile, comp: Composition) -> list[str]:
-    """Points de charte non tranchés, identiques d'un rendu à l'autre : regroupés sur une seule ligne."""
-    points = ["règles d'usage du logo (taille minimale, zone de protection, fonds) absentes de la charte"]
-    points += [w for w in comp.warnings if "logo" in w.lower() or "Maison et Jardin" in w]
+    """Points de charte non tranchés, identiques d'un rendu à l'autre : regroupés sur une seule ligne.
+
+    Les règles d'usage du logo (taille minimale, zone de protection, fonds) ne sont signalées que tant qu'elles
+    figurent parmi les points à confirmer du profil.
+    """
+    points = [u for u in profile.unknowns if "logo" in u.lower()]
+    points += [w for w in comp.warnings if "logo" in w.lower()]
     return points
 
 
@@ -299,7 +303,8 @@ def run_checks(path: Path, comp: Composition, brief: Brief, profile: BrandProfil
     brief_points = plan_warnings + [w for w in comp.warnings if w not in charter]
     if brief_points:
         results.append(CheckResult("Points à confirmer pour ce brief", NON_CONCLUANT, " ; ".join(brief_points)))
-    results.append(CheckResult("Charte : points non tranchés", NON_CONCLUANT,
-                               f"{len(charter)} point(s) identiques pour tous les rendus : " + " ; ".join(charter),
-                               "À faire valider une fois par le responsable de marque."))
+    if charter:
+        results.append(CheckResult("Charte : points non tranchés", NON_CONCLUANT,
+                                   f"{len(charter)} point(s) identiques pour tous les rendus : " + " ; ".join(charter),
+                                   "À faire valider une fois par le responsable de marque."))
     return results

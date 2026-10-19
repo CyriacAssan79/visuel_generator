@@ -69,7 +69,7 @@ def prepare_plan(profile: BrandProfile, brief: Brief, template_id: str, source_i
     plan.preferences = [brief.visual_direction]
 
     direction = brief.visual_direction.lower()
-    if any(w in direction for w in OVERLAY_WORDS):
+    if not profile.overlays_allowed and any(w in direction for w in OVERLAY_WORDS):
         plan.warnings.append("La direction demande une transparence ou un dégradé ; la charte impose les couleurs "
                              "principales à 100 % : à confirmer par le responsable de marque.")
     if any(w in direction for w in ICON_WORDS) and not brief.icons:

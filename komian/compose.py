@@ -235,7 +235,9 @@ class Composer:
             self.text(canvas, lm.tagline, "mention_logo_locale", "regular", "blanc",
                       (logo_box[0], logo_box[3] + round(H * 0.004), logo_box[2] - logo_box[0], round(H * 0.04)),
                       max_size=round(H * 0.03), min_size=round(H * 0.016), align="right", valign="top")
-            self.warnings.append("Mention « Maison et Jardin » recomposée en Ubuntu : logo local officiel à confirmer.")
+            if lm.status != "confirmé":
+                self.warnings.append(f"Mention « {lm.tagline} » recomposée en Ubuntu : logo local officiel "
+                                     "à confirmer.")
 
 
 

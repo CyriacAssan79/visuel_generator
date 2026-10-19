@@ -51,6 +51,7 @@ class BrandProfile(BaseModel):
     fonts: dict[str, str]
     primary_colors: dict[str, Color]
     primary_color_rule: str
+    overlays_allowed: bool = Field(False, description="Aplats semi-transparents sur photo validés par la marque")
     neutral_colors: dict[str, Color] = {}
     series_tags: dict[str, list[str]] = {}
     secondary_colors: list[Color]
@@ -69,6 +70,7 @@ class BrandProfile(BaseModel):
     def allowed_system_colors(self) -> dict[str, tuple[int, int, int]]:
         colors = {c.name: c.rgb for c in self.primary_colors.values()}
         colors.update({c.name: c.rgb for c in self.neutral_colors.values()})
+        colors.update({c.name: c.rgb for c in self.secondary_colors if c.status == "confirmé"})
         colors["blanc"] = (255, 255, 255)
         return colors
 

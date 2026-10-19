@@ -50,4 +50,4 @@ Aucun de ces outils ne remplace la relecture du visuel. Restent toujours à vér
 
 - les mains, les objets et l'absence de texte parasite dans une scène générée par IA ;
 - les éléments interdits déclarés dans le brief ;
-- les points de la charte non tranchés (règles d'usage du logo, logo blanc dérivé, mention « Maison et Jardin »).
+- les points de la charte non tranchés, s'il en reste dans le profil de marque (`unknowns`). Pour Mr.Bricolage, tous ont été validés le 19 octobre 2026 : le rapport n'affiche plus cette ligne.

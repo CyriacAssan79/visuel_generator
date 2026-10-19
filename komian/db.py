@@ -176,7 +176,7 @@ def get_checks(conn, render_id: str) -> list[sqlite3.Row]:
 
 
 def list_renders(conn, brand_id: str | None = None) -> list[sqlite3.Row]:
-    sql = ("SELECT r.*, b.brief_key, b.version AS brief_version, b.brand_id FROM renders r"
+    sql = ("SELECT r.*, b.brief_key, b.version AS brief_version, b.brand_id, b.data AS brief_data FROM renders r"
            " JOIN briefs b ON b.id = r.brief_id")
     args = ()
     if brand_id:

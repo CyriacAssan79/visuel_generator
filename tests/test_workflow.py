@@ -233,11 +233,23 @@ def test_forbidden_spelling_is_an_anomaly():
     assert check_spelling(make_brief(), profile).status == "conforme"
 
 
-def test_overlay_request_is_flagged_before_generation():
-    profile = load_profile("mr_bricolage")
-    plan = prepare_plan(profile, make_brief(visual_direction="Photo désaturée, overlay rouge semi-transparent"),
-                        "bandeau_titre_haut", "photo")
+def test_overlay_request_is_flagged_unless_brand_allows_it():
+    brief = make_brief(visual_direction="Photo désaturée, overlay rouge semi-transparent")
+    allowed = load_profile("mr_bricolage")  # overlays validés par la marque le 2026-10-19
+    assert allowed.overlays_allowed
+    plan = prepare_plan(allowed, brief, "bandeau_titre_haut", "photo")
+    assert not any("100 %" in w for w in plan.warnings)
+    strict = allowed.model_copy(update={"overlays_allowed": False})
+    plan = prepare_plan(strict, brief, "bandeau_titre_haut", "photo")
     assert any("100 %" in w for w in plan.warnings)
+
+
+def test_validated_brand_has_no_open_points():
+    profile = load_profile("mr_bricolage")
+    assert profile.unknowns == []
+    assert profile.primary_colors["rouge"].hex == "#EB0029"
+    assert all(logo.status == "confirmé" for logo in profile.logos)
+    assert "orange" in profile.allowed_system_colors  # couleurs secondaires définitives
 
 
 def test_unknown_format_blocks_generation(conn):

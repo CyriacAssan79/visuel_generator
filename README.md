@@ -35,19 +35,21 @@ La base enregistre des chemins relatifs au projet : elle fonctionne sous WSL com
 
 ## Parcours
 
-1. **Brief** : objectif, format, accroche, texte exact, direction artistique, icônes, étiquette de série. Le brief est versionné : toute modification exige une justification.
-2. **Génération** : choix d'un gabarit et d'une source de fond.
-   - **Photo importée** : banque d'images libre de droits.
-   - **Formes géométriques** : aplats aux couleurs de la charte.
-   - **IA locale** : mode rapide (environ 8 s, LCM Dreamshaper) ou qualité (environ 50 s, Realistic Vision : visages et mains plus fiables). La description de la scène peut être saisie en français : elle est traduite automatiquement.
+L'interface ne montre que ce qui sert à créer et valider un visuel. Les détails techniques (modèle, moteur, graine, identifiants) restent enregistrés en base, mais ne sont pas affichés. En cas d'échec, l'utilisateur voit un message simple et les détails sont repliés sous « Détails pour l'administrateur ».
 
-   Par défaut, trois mises en page sont proposées sur le même fond. Elles dégagent les visages et varient le style et la position du message. Avant le rendu, le plan de génération signale les contradictions entre le brief et la charte.
-3. **Contrôle et validation** : le rapport n'affiche que les anomalies et les points à vérifier à l'œil ; les contrôles conformes sont repliés. L'approbation est refusée s'il reste une anomalie. Elle est liée à l'empreinte SHA-256 du fichier exact, et le choix d'une variante écarte automatiquement les autres.
-4. **Export** : bloqué sans approbation valide pour le fichier exact.
+1. **✏️ Brief** : le message (texte exact, accroche), le contexte (série, objectif, format, réseaux) et la mise en forme (direction artistique, logo, icônes, éléments à éviter). Le brief est versionné : toute modification exige d'indiquer ce qui change.
+2. **🎨 Création** : choix de la mise en page et de l'image de fond.
+   - **📷 Ma photo** : photo libre de droits importée.
+   - **🔷 Formes aux couleurs de la marque** : aplats aux couleurs de la charte.
+   - **✨ Image créée par l'IA** : mode ⚡ Rapide (environ 6 s, LCM Dreamshaper) pour essayer des idées, ou ✨ Qualité (environ 50 s, Realistic Vision : visages et mains plus fiables) pour la version finale. La scène peut être décrite en français.
 
-Chaque rendu enregistre son brief, son gabarit, sa disposition et, pour l'IA, le modèle, sa licence, la graine et les descriptions saisie et traduite.
+   Par défaut, trois mises en page sont proposées sur le même fond. Elles dégagent les visages et varient le style et la position du message. Les contradictions entre le brief et la charte sont signalées avant la création.
+3. **✅ Validation** : choix de la mise en page, puis rapport limité aux points à corriger et à vérifier à l'œil ; les contrôles réussis sont repliés. L'approbation est impossible s'il reste un point à corriger. Elle est liée à l'empreinte SHA-256 du fichier exact, et le choix d'une mise en page écarte automatiquement les autres. Une fois le visuel approuvé, **« Préparer le fichier final »** l'exporte et propose son téléchargement.
+4. **🗂️ Galerie** : tous les visuels de la marque, filtrables par statut (en attente, approuvés, rejetés). « Ouvrir » affiche le visuel dans l'onglet Validation.
 
-Si des fichiers de rendu sont supprimés à la main, le bouton **« Mettre à jour la base »** de la barre latérale retire les rendus orphelins. Les rendus exportés sont conservés.
+Chaque visuel enregistre son brief, sa mise en page et, pour l'IA, le modèle, sa licence, la graine et les descriptions saisie et traduite.
+
+Si des images sont supprimées à la main du dossier, le bouton **« Retirer de la galerie »** de la barre latérale nettoie la galerie. Les visuels exportés restent dans l'historique.
 
 ## Organisation
 
@@ -61,7 +63,7 @@ Si des fichiers de rendu sont supprimés à la main, le bouton **« Mettre à jo
 | `komian/ocr.py`, `komian/saliency.py` | Relecture OCR, détection de visages, repérage du sujet |
 | `komian/workflow.py` | Plan, rendu, variantes, validation, export |
 | `komian/db.py`, `komian/models.py` | Base SQLite et modèles de données (Pydantic) |
-| `data/brands/<marque>/profile.yaml` | Profil de marque, avec les points « à confirmer » |
+| `data/brands/<marque>/profile.yaml` | Profil de marque, décisions validées et points éventuellement « à confirmer » |
 | `data/models.yaml` | Modèles d'images proposés et mode par défaut |
 | `data/renders/pending/`, `data/exports/approved/` | Rendus en attente et exports approuvés |
 | `benchmarks/` | Script et résultats des mesures de performance des modèles |
@@ -79,4 +81,15 @@ Si des fichiers de rendu sont supprimés à la main, le bouton **« Mettre à jo
 ## Points ouverts
 
 - **Licences des modèles d'images**, et obligation éventuelle d'indiquer qu'une image a été générée par IA : à faire valider par le juridique avant usage commercial (voir [docs/index.md](docs/index.md)).
-- **Charte Mr.Bricolage** : version applicable au marché ivoirien, fichiers officiels du logo blanc et du logo « Maison et Jardin », règles d'usage du logo (taille minimale, zone de protection), couleurs secondaires définitives. Ces points sont listés dans `data/brands/mr_bricolage/profile.yaml`.
+## Décisions de charte (Mr.Bricolage)
+
+Les points ouverts de la charte ont été validés le 19 octobre 2026. Le fonctionnement existant est accepté tel quel :
+
+- le guide de 2017 s'applique au marché ivoirien ;
+- la mention « Maison et Jardin » recomposée en Ubuntu et le logo blanc dérivé automatiquement sont acceptés ;
+- la taille, la position et les fonds du logo des gabarits actuels sont acceptés ;
+- les six couleurs secondaires sont définitives ;
+- le rouge de référence reste **#EB0029**, malgré les écarts mesurés sur le fichier du logo et les visuels déjà livrés ;
+- les aplats semi-transparents sur photo sont autorisés.
+
+Le détail figure en tête de `data/brands/mr_bricolage/profile.yaml`.
