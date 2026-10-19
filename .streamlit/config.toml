@@ -1,0 +1,57 @@
+# Thème du studio : charte KÔMIAN v1.0 (noir et blanc dominants, Pulse Indigo en accent, Mozilla Text).
+# Les visuels générés, eux, suivent la charte du client sélectionné.
+# Les réglages fins (boutons en capitales, libellés mono, statuts…) sont dans komian/ui.py.
+
+[server]
+enableStaticServing = true  # sert le dossier static/ (polices, logos KÔMIAN) sous app/static/
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#5D63FF"
+backgroundColor = "#F2F2F2"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#000000"
+linkColor = "#5D63FF"
+borderColor = "#CCCCCC"
+showWidgetBorder = true
+baseRadius = "2px"
+buttonRadius = "2px"
+font = "Mozilla Text"
+headingFont = "Mozilla Text"
+codeFont = "monospace"
+baseFontSize = 15
+showSidebarBorder = false
+
+[[theme.fontFaces]]
+family = "Mozilla Text"
+url = "app/static/fonts/MozillaText-Light.ttf"
+weight = 300
+
+[[theme.fontFaces]]
+family = "Mozilla Text"
+url = "app/static/fonts/MozillaText-Regular.ttf"
+weight = 400
+
+[[theme.fontFaces]]
+family = "Mozilla Text"
+url = "app/static/fonts/MozillaText-Medium.ttf"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Mozilla Text"
+url = "app/static/fonts/MozillaText-SemiBold.ttf"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Mozilla Text"
+url = "app/static/fonts/MozillaText-Bold.ttf"
+weight = 700
+
+[theme.sidebar]
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#1C1C1C"
+textColor = "#B3B3B3"
+borderColor = "#333333"
