@@ -1,35 +1,55 @@
-# Moteur IA local. `active` désigne le modèle utilisé par défaut ; `choices` ceux proposés dans l'application.
-# Chaque modèle a été mesuré sur cette machine (benchmarks/results/, 2026-10-18).
-#   engine : « diffusers » (PyTorch, processeur) ou « openvino » (accélération Intel)
-#   device : CPU (processeur) ou GPU (puce graphique Intel Iris Xe) pour OpenVINO
-#   repo : dépôt Hugging Face (téléchargé au premier usage) ou, avec `path`, dépôt source du modèle converti
-#   path : dossier d'un modèle converti sur la machine (voir convert_script)
-#   scheduler : planificateur imposé (noms OpenVINO GenAI : EULER_ANCESTRAL_DISCRETE, DDIM, PNDM…)
-#   expected_s : temps mesuré par scène en régime établi
-active: lcm_ov_gpu
-choices: [lcm_ov_gpu, rv51_ov_int8_gpu]
+# Moteur IA local : une boucle de contrôle qualité enchaîne trois modèles (docs/generation-images.md).
+#   fast     : crée les candidates et ajoute l'objet dans la main (LCM, quelques secondes par image)
+#   quality  : passage en qualité au moment de l'approbation (Realistic Vision)
+#   verifier : vérifie l'action demandée et localise la main (modèle vision-langage)
+# Sous WSL, la puce graphique puise dans la mémoire de WSL (~8 Go) : « fast » et « quality » ne tiennent pas
+# ensemble et alternent ; le vérificateur reste chargé. Mesures : benchmarks/results/ (2026-10-18 et 19).
+loop:
+  fast: rv51_lcm_ov_gpu
+  quality: rv51_ov_int8_gpu
+  verifier: qwen3vl_4b_gpu
+  budget_s: 90            # temps maximal de la boucle à la création (hors premier chargement des modèles)
+  max_candidates: 3       # images rapides essayées avant d'ajouter l'objet dans la main
+  object_attempts: 2      # essais d'ajout de l'objet
+  quality_strength: 0.4   # part de l'image redessinée au passage en qualité (au-delà, la scène change)
+  area: 262144            # surface générée (512 × 512 px), répartie selon le format du gabarit
+
+# Champs : repo (dépôt Hugging Face, ou dépôt source avec `path`), path (modèle converti sur la machine),
+# device (GPU = puce graphique Intel, CPU = processeur), scheduler (planificateur OpenVINO imposé).
 models:
+  # Aperçu photoréaliste : Realistic Vision avec l'extension LCM-LoRA fusionnée (6 étapes, ~6 s, sans guidage :
+  # la liste d'exclusion n'agit pas, d'où la tenue imposée et le contrôle de tenue de la boucle).
+  rv51_lcm_ov_gpu:
+    label: "Realistic Vision V5.1 rapide (LCM-LoRA fusionné)"
+    repo: "SG161222/Realistic_Vision_V5.1_noVAE + latent-consistency/lcm-lora-sdv1-5"
+    path: "~/.cache/komian/models/realistic-vision-v5.1-lcm-int8-ov"
+    convert_script: "scripts/convert_realistic_vision_lcm.sh"
+    device: GPU
+    lcm: true
+    licence: "CreativeML OpenRAIL-M ; LCM-LoRA sous OpenRAIL++"
+    steps: 6
+    guidance_scale: 1.0
+  # Ancien modèle rapide, remplacé le 2026-10-19 (rendu trop « peint ») ; conservé pour comparaison.
   lcm_ov_gpu:
-    label: "Rapide : LCM Dreamshaper v7 (≈ 6 s, image plus douce)"
+    label: "LCM Dreamshaper v7"
     repo: "OpenVINO/LCM_Dreamshaper_v7-int8-ov"
-    engine: openvino
     device: GPU
     lcm: true
     licence: "MIT"
     steps: 6
     guidance_scale: 8.0
-    base_size: 512
-    expected_s: 6
   rv51_ov_int8_gpu:
-    label: "Qualité : Realistic Vision V5.1 (≈ 50 s, visages et mains plus fiables)"
+    label: "Realistic Vision V5.1"
     repo: "SG161222/Realistic_Vision_V5.1_noVAE"
     path: "~/.cache/komian/models/realistic-vision-v5.1-int8-ov"
     convert_script: "scripts/convert_realistic_vision.sh"
-    engine: openvino
     device: GPU
     scheduler: EULER_ANCESTRAL_DISCRETE
     licence: "CreativeML OpenRAIL-M"
     steps: 25
     guidance_scale: 5.0
-    base_size: 512
-    expected_s: 50
+  qwen3vl_4b_gpu:
+    label: "Qwen3-VL 4B"
+    repo: "OpenVINO/Qwen3-VL-4B-Instruct-int4-ov"
+    device: GPU
+    licence: "Apache 2.0"

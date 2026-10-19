@@ -44,6 +44,18 @@ Ce n'est pas un modèle entraîné, mais un algorithme classique de **carte de s
 - Usage : classer les dispositions du message. Une disposition qui couvre peu de zones saillantes, sur un fond calme, est préférée.
 - Limite : il peut retenir un décor contrasté (cadre en bois, feuillage) plutôt qu'un visage. C'est pourquoi la détection de visages, plus fiable pour les personnes, prime sur lui.
 
+## Contrôles de la scène créée par l'IA
+
+Pour un fond créé par l'IA, trois contrôles s'ajoutent. Ils reprennent le rapport de la [boucle de contrôle qualité](generation-images.md#boucle-de-contrôle-qualité), puis celui de la version finale après l'approbation :
+
+| Contrôle | Conforme | À vérifier à l'œil |
+|---|---|---|
+| **Action demandée** | Le vérificateur (Qwen3-VL) confirme le geste avec l'objet nommé dans la description. Si l'objet a été ajouté dans la main par l'IA, c'est précisé. | « L'action demandée n'apparaît pas : relancez ou utilisez une photo. » |
+| **Tenue** | La personne est habillée (contrôle du vérificateur). | **Anomalie**, et non simple point à vérifier : une personne torse nu bloque l'approbation. |
+| **Visage** | Les 5 points du visage (yeux, nez, coins de la bouche) sont cohérents, et le visage est assez grand et net. | Le défaut est nommé : nez décalé, yeux pas à niveau, écart des yeux anormal, visage trop petit ou peu net. |
+
+Le contrôle « Action demandée » n'apparaît que si un objet tenu est reconnu dans la description, et les contrôles « Tenue » et « Visage » que si une personne est détectée. Ce sont des contrôles automatiques : un « conforme » ne dispense pas de regarder les mains.
+
 ## Ce qui reste un contrôle humain
 
 Aucun de ces outils ne remplace la relecture du visuel. Restent toujours à vérifier à l'œil, et sont signalés comme tels dans le rapport de contrôle :

@@ -10,15 +10,16 @@ from pathlib import Path
 import streamlit as st
 
 from komian import db
-from komian.backgrounds import (SOURCES, GeometricSource, SourceUnavailable, active_model, model_choices,
+from komian.backgrounds import (SOURCES, GeometricSource, SourceUnavailable, ai_configured, model_spec,
                                 resolve_device, suggest_prompt)
 from komian.brands import list_brands, load_profile
 from komian.compose import TEMPLATES, layout_label
 from komian.config import FORMATS, from_stored, to_stored
 from komian.models import Brief
 from komian.storage import ImportRejected, import_image
-from komian.workflow import (ApprovalRefused, ExportBlocked, PlanBlocked, decide, export_approved, generate,
-                             generate_variants, prepare_plan)
+from komian.workflow import (ApprovalRefused, ExportBlocked, PlanBlocked, QualityNotApproved,
+                             cancel_quality_approval, decide, export_approved, generate, generate_variants,
+                             needs_quality_pass, prepare_plan)
 
 # --- Libellés affichés -----------------------------------------------------------
 OBJECTIVES = ["motiver", "promouvoir", "informer", "recruter", "sensibiliser", "autre"]
@@ -92,12 +93,14 @@ def show_image(container, stored_path) -> bool:
     return False
 
 
-def mode_label(spec: dict) -> str:
-    """« ⚡ Rapide · ≈ 6 s — pour essayer des idées » à partir de la configuration du modèle."""
-    name = spec.get("label", "").split(":")[0].strip() or "IA"
-    if spec.get("lcm"):
-        return f"⚡ {name} · ≈ {spec['expected_s']} s — pour essayer des idées"
-    return f"✨ {name} · ≈ {spec['expected_s']} s — pour la version finale"
+def superseded_ids(rows) -> set[str]:
+    """Aperçus remplacés par une version qualité encore valable (ils ne sont plus proposés à la validation)."""
+    ids = set()
+    for r in rows:
+        source = json.loads(r["params"]).get("quality_of")
+        if source and r["status"] != "rejected":
+            ids.add(source)
+    return ids
 
 
 # --- Barre latérale : marque -----------------------------------------------------
@@ -239,7 +242,7 @@ with tab_gen:
         source_ids = list(SOURCES)
         source_id = st.radio("Image de fond", source_ids, horizontal=True, label_visibility="collapsed",
                              format_func=lambda s: SOURCE_LABELS.get(s, s),
-                             index=source_ids.index("ia_locale" if active_model() else "geometrique"))
+                             index=source_ids.index("ia_locale" if ai_configured() else "geometrique"))
         st.caption(SOURCE_HELP.get(source_id, ""))
 
         plan = prepare_plan(profile, brief, template_id, source_id)
@@ -250,7 +253,7 @@ with tab_gen:
 
         params: dict = {}
         upload = None
-        expected_s = None
+        wait = ""
         if source_id == "photo":
             upload = st.file_uploader("Photo (JPG, PNG ou WEBP)", type=["jpg", "jpeg", "png", "webp"])
             c1, c2 = st.columns(2)
@@ -269,19 +272,14 @@ with tab_gen:
             if variant != "auto":
                 params["variant"] = variant
         else:
-            choices = model_choices()
-            if not choices:
+            if not ai_configured():
                 st.warning("La création d'image par IA n'est pas disponible sur ce poste.")
             else:
-                default_key = active_model()[0]
-                keys = [k for k, _ in choices]
-                params["model_choice"] = st.radio(
-                    "Qualité", keys, horizontal=True, index=keys.index(default_key) if default_key in keys else 0,
-                    format_func=lambda k: mode_label(dict(choices)[k]))
-                spec = dict(choices)[params["model_choice"]]
-                expected_s = spec["expected_s"]
-                device = spec.get("device", "CPU")
-                if spec.get("engine") == "openvino" and resolve_device(device) != device.upper():
+                st.caption("L'IA crée la scène, vérifie le visage et le geste demandé, puis corrige si besoin. "
+                           "La version finale, en haute qualité, est produite au moment de l'approbation.")
+                wait = " (jusqu'à 1 min 30 ; la première création après un démarrage prend 2 à 3 minutes de plus)"
+                device = model_spec("fast")[1].get("device", "CPU")
+                if resolve_device(device) != device.upper():
                     st.warning("Ce poste fonctionne en mode ralenti : la création prendra environ 10 fois plus "
                                "de temps que prévu.")
             params["prompt"] = st.text_area(
@@ -294,16 +292,15 @@ with tab_gen:
                     "- **Précisez la tenue** (« en t-shirt blanc », « en chemise rouge »).\n"
                     "- **Évitez les gestes précis avec un outil** et les petits visages en plan large : "
                     "préférez alors une vraie photo.\n"
-                    "- Le résultat ne convient pas ? **Relancez** : chaque création propose une nouvelle image.\n"
-                    "- Le mode ⚡ Rapide sert à essayer des idées ; passez en ✨ Qualité pour la version finale.")
+                    "- **Nommez l'outil tenu** (perceuse, arrosoir, carton, pinceau…) : l'IA vérifie qu'il est bien "
+                    "dans la main et l'ajoute si besoin. Le rouleau de peinture reste hors de sa portée.\n"
+                    "- Le résultat ne convient pas ? **Relancez** : chaque création propose une nouvelle image.")
             params["saturation"] = st.slider("Intensité des couleurs", 0.0, 1.0, 1.0, 0.05, help="0 = noir et blanc")
 
         n_layouts = len(TEMPLATES[template_id]["layouts"])
         variants = st.toggle(f"Proposer {min(3, n_layouts)} mises en page au choix", value=n_layouts > 1,
                              disabled=n_layouts < 2)
         if st.button("✨ Créer le visuel", type="primary", disabled=bool(plan.blocking)):
-            wait = (f" (environ {expected_s} s ; la première création après un démarrage prend 1 à 3 minutes de "
-                    "plus)") if expected_s else ""
             try:
                 if source_id == "photo":
                     if upload is None:
@@ -344,7 +341,11 @@ with tab_gen:
 # --- 3. Validation ---------------------------------------------------------------
 with tab_check:
     with db.connect() as conn:
-        renders = [r for r in db.list_renders(conn, brand_id) if r["status"] != "error"]
+        all_rows = [r for r in db.list_renders(conn, brand_id) if r["status"] != "error"]
+    # Un aperçu remplacé par sa version finale, ou une version finale annulée, n'est plus à examiner
+    hidden = superseded_ids(all_rows) | {r["id"] for r in all_rows if r["status"] == "rejected"
+                                         and json.loads(r["params"]).get("quality_of")}
+    renders = [r for r in all_rows if r["id"] not in hidden]
     if not renders:
         st.info("Aucun visuel à valider pour le moment. Créez-en un dans l'onglet 🎨 2. Création.")
     else:
@@ -374,7 +375,8 @@ with tab_check:
                     statuses = [c["status"] for c in db.get_checks(conn, r["id"])]
                 show_image(col, r["file_path"])
                 n_fix = statuses.count("anomalie")
-                col.caption(f"**{layout_label(r['layout'])}**  \n"
+                final = " · ✨ version finale" if json.loads(r["params"]).get("quality_of") else ""
+                col.caption(f"**{layout_label(r['layout'])}{final}**  \n"
                             + (f"❌ {n_fix} à corriger" if n_fix else "✅ Prête à valider"))
             ids = [r["id"] for r in group]
             default = ids.index(st.session_state.render_id) if st.session_state.render_id in ids else 0
@@ -391,8 +393,14 @@ with tab_check:
         st.divider()
         left, right = st.columns([1, 1])
         show_image(left, render["file_path"])
+        render_params = json.loads(render["params"])
+        is_preview = needs_quality_pass(render, render_params)
         with right:
             status_badge(st, render["status"])
+            if render_params.get("quality_of"):
+                st.caption("✨ Version finale en haute qualité, créée à l'approbation de l'aperçu.")
+            if st.session_state.get("check_notice"):
+                st.warning(st.session_state.pop("check_notice"))
             if approval:
                 verb = "Approuvé" if approval["decision"] == "approved" else "Rejeté"
                 st.caption(f"{verb} par {approval['reviewer']} le {fmt_date(approval['created_at'])}"
@@ -416,6 +424,9 @@ with tab_check:
 
             with st.form("decision"):
                 st.markdown("**Votre décision**")
+                if is_preview:
+                    st.caption("Ceci est un aperçu. À l'approbation, la version finale est créée en haute qualité "
+                               "(30 s à 2 min), contrôlée à nouveau, puis approuvée si elle reste conforme.")
                 reviewer = st.text_input("Votre nom")
                 comment = st.text_area("Commentaire (facultatif)", height=80)
                 ack = st.checkbox("J'ai vérifié à l'œil les points signalés", disabled=not to_look)
@@ -425,13 +436,43 @@ with tab_check:
                 reject = c2.form_submit_button("Rejeter", width="stretch")
             if approve or reject:
                 try:
-                    with db.connect() as conn:
-                        decide(conn, render_id, "approved" if approve else "rejected", reviewer, comment,
-                               ack or not to_look)
-                    st.session_state.flash = "Visuel approuvé." if approve else "Visuel rejeté."
+                    waiting = ("Création de la version finale en haute qualité…" if approve and is_preview
+                               else "Enregistrement…")
+                    with st.spinner(waiting), db.connect() as conn:
+                        approval_id = decide(conn, render_id, "approved" if approve else "rejected", reviewer,
+                                             comment, ack or not to_look)
+                        st.session_state.render_id = db.get_approval(conn, approval_id)["render_id"]
+                    if approve and is_preview:
+                        st.session_state.flash = ("Version finale approuvée. Vérifiez-la : vous pouvez encore "
+                                                  "annuler l'approbation.")
+                    else:
+                        st.session_state.flash = "Visuel approuvé." if approve else "Visuel rejeté."
+                    st.rerun()
+                except QualityNotApproved as exc:
+                    st.session_state.render_id = exc.render_id
+                    st.session_state.check_notice = str(exc)
                     st.rerun()
                 except ApprovalRefused as exc:
                     st.error(str(exc))
+                except SourceUnavailable as exc:
+                    st.error("La version finale n'a pas pu être créée sur ce poste : l'aperçu reste en attente.")
+                    with st.expander("Détails pour l'administrateur"):
+                        st.code(str(exc), language=None)
+
+            if render["status"] == "approved" and render_params.get("quality_of"):
+                with st.expander("↩️ Annuler l'approbation"):
+                    with st.form("cancel"):
+                        st.caption("La version finale sera rejetée et l'aperçu reviendra en attente de validation.")
+                        canceller = st.text_input("Votre nom", key="cancel_name")
+                        if st.form_submit_button("Annuler l'approbation"):
+                            try:
+                                with db.connect() as conn:
+                                    preview = cancel_quality_approval(conn, render_id, canceller)
+                                st.session_state.render_id = preview or render_id
+                                st.session_state.flash = "Approbation annulée : l'aperçu est de nouveau en attente."
+                                st.rerun()
+                            except ApprovalRefused as exc:
+                                st.error(str(exc))
 
             if render["status"] == "approved":
                 if st.button("📦 Préparer le fichier final", width="stretch"):
@@ -450,6 +491,8 @@ with tab_check:
 with tab_gallery:
     with db.connect() as conn:
         rows = [r for r in db.list_renders(conn, brand_id) if r["status"] != "error"]
+    replaced = superseded_ids(rows)
+    rows = [r for r in rows if r["id"] not in replaced]  # seule la version finale reste visible
     if not rows:
         st.info("La galerie est vide : vos visuels apparaîtront ici.")
     else:

@@ -55,8 +55,8 @@ def _detector():
     return cv2.FaceDetectorYN.create(str(FACE_MODEL), "", (DETECT_SIZE, DETECT_SIZE), FACE_MIN_CONFIDENCE)
 
 
-def detect_faces(image: Image.Image) -> list[tuple[int, int, int, int, float]]:
-    """Visages (x0, y0, x1, y1, confiance) dans les coordonnées de `image`."""
+def _raw_faces(image: Image.Image) -> np.ndarray:
+    """Sortie YuNet ramenée aux coordonnées de `image` : x, y, l, h, 5 points (x, y) puis confiance."""
     import cv2
     det = _detector()
     scale = DETECT_SIZE / max(image.size)
@@ -64,9 +64,64 @@ def detect_faces(image: Image.Image) -> list[tuple[int, int, int, int, float]]:
     det.setInputSize((w, h))
     _, faces = det.detect(cv2.cvtColor(np.asarray(image.convert("RGB").resize((w, h))), cv2.COLOR_RGB2BGR))
     if faces is None:
-        return []
-    return [(round(f[0] / scale), round(f[1] / scale), round((f[0] + f[2]) / scale), round((f[1] + f[3]) / scale),
-             round(float(f[-1]), 2)) for f in faces]
+        return np.empty((0, 15))
+    faces = faces.copy()
+    faces[:, :14] /= scale
+    return faces
+
+
+def detect_faces(image: Image.Image) -> list[tuple[int, int, int, int, float]]:
+    """Visages (x0, y0, x1, y1, confiance) dans les coordonnées de `image`."""
+    return [(round(f[0]), round(f[1]), round(f[0] + f[2]), round(f[1] + f[3]), round(float(f[-1]), 2))
+            for f in _raw_faces(image)]
+
+
+# --- Qualité du visage principal (boucle de contrôle de l'IA) ------------------
+FACE_MIN_WIDTH = 48          # px dans l'image générée (~512 px) : en dessous, le visage est forcément flou
+FACE_QUALITY_CONFIDENCE = 0.7
+SHARPNESS_REFERENCE = 150    # variance du laplacien d'un visage net à cette taille
+
+
+def face_geometry(width: float, landmarks) -> dict[str, bool]:
+    """Cohérence des 5 points du visage : yeux, nez, coins de la bouche (ordre YuNet)."""
+    right_eye, left_eye, nose, right_mouth, left_mouth = (np.asarray(p, dtype=float) for p in landmarks)
+    eye_dist = float(np.hypot(*(left_eye - right_eye)))
+    tilt = abs(float(np.degrees(np.arctan2(left_eye[1] - right_eye[1], left_eye[0] - right_eye[0]))))
+    eyes_x = sorted((right_eye[0], left_eye[0]))
+    return {
+        "yeux à niveau": tilt < 25 or tilt > 155,
+        "nez entre les yeux": eyes_x[0] - 0.2 * eye_dist <= nose[0] <= eyes_x[1] + 0.2 * eye_dist,
+        "yeux, nez et bouche dans l'ordre": (right_eye[1] + left_eye[1]) / 2 < nose[1]
+                                            < (right_mouth[1] + left_mouth[1]) / 2,
+        "écart des yeux": 0.25 <= eye_dist / max(width, 1e-9) <= 0.65,
+    }
+
+
+def face_quality(image: Image.Image) -> dict | None:
+    """Visage principal : géométrie, taille, netteté, confiance. None si aucun visage n'est détecté.
+
+    Renvoie {"ok", "score" (pour classer des candidates), "width", "sharpness", "confidence", "problems"}.
+    """
+    import cv2
+    faces = _raw_faces(image)
+    if not len(faces):
+        return None
+    f = max(faces, key=lambda r: r[2] * r[3])
+    x, y, w, h = (float(v) for v in f[:4])
+    landmarks = f[4:14].reshape(5, 2)
+    geometry = face_geometry(w, landmarks)
+    gray = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    crop = gray[max(0, int(y)):int(y + h), max(0, int(x)):int(x + w)]
+    sharpness = float(cv2.Laplacian(crop, cv2.CV_64F).var()) if crop.size else 0.0
+    confidence = float(f[14])
+    problems = [name for name, ok in geometry.items() if not ok]
+    if w < FACE_MIN_WIDTH:
+        problems.append("visage trop petit")
+    if confidence < FACE_QUALITY_CONFIDENCE:
+        problems.append("visage peu net ou déformé")
+    score = confidence * min(1.0, w / 120) * min(1.0, sharpness / SHARPNESS_REFERENCE)
+    return {"ok": not problems, "score": round(score, 3), "width": round(w), "sharpness": round(sharpness),
+            "confidence": round(confidence, 2), "problems": problems}
 
 
 def faces_on_canvas(background: Image.Image, layers: list[dict]) -> list[tuple[int, int, int, int, float]]:

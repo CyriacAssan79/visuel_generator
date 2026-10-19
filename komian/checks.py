@@ -264,6 +264,49 @@ def check_spelling(brief: Brief, profile: BrandProfile) -> CheckResult:
                        "Les mentions locales (identifiant réseau social, adresse) ne sont pas concernées.")
 
 
+# Critère de face_geometry non respecté -> défaut affiché
+FACE_PROBLEMS = {"yeux à niveau": "yeux pas à niveau", "nez entre les yeux": "nez décalé",
+                 "yeux, nez et bouche dans l'ordre": "traits mal placés", "écart des yeux": "écart des yeux anormal",
+                 "visage trop petit": "visage trop petit dans l'image", "visage peu net ou déformé": "visage peu net"}
+
+
+def loop_checks(loop: dict | None) -> list[CheckResult]:
+    """Contrôles issus de la boucle de l'IA : sur la version qualité si elle existe, sinon sur l'aperçu."""
+    if not loop:
+        return []
+    current = {**loop, **loop.get("final", {})}
+    results = []
+    if loop.get("question"):
+        obj = loop.get("object")
+        if current.get("action_verified"):
+            detail = f"Geste avec l'objet « {obj} » vérifié automatiquement"
+            if loop.get("object_added"):
+                detail += " (objet ajouté dans la main par l'IA)"
+            results.append(CheckResult("Action demandée", CONFORME, detail + ".",
+                                       "Contrôle automatique par un modèle vision-langage."))
+        else:
+            results.append(CheckResult("Action demandée", NON_CONCLUANT,
+                                       "L'action demandée n'apparaît pas : relancez ou utilisez une photo.",
+                                       f"Objet attendu : {obj} ; contrôle automatique, à confirmer à l'œil."))
+    if current.get("clothed") is False:
+        results.append(CheckResult("Tenue", ANOMALIE, "Personne dévêtue (torse nu) : à ne pas publier. "
+                                   "Relancez la création en précisant la tenue.",
+                                   "Contrôle automatique par un modèle vision-langage."))
+    elif current.get("clothed"):
+        results.append(CheckResult("Tenue", CONFORME, "Personne habillée.",
+                                   "Contrôle automatique par un modèle vision-langage."))
+    face = current.get("face")
+    if face:
+        if face["ok"]:
+            results.append(CheckResult("Visage", CONFORME, "Visage net et bien formé (yeux, nez, bouche).",
+                                       f"{face['width']} px dans l'image générée, netteté {face['sharpness']}."))
+        else:
+            problems = [FACE_PROBLEMS.get(p, p) for p in face["problems"]]
+            results.append(CheckResult("Visage", NON_CONCLUANT, "Visage à vérifier : " + ", ".join(problems) + ".",
+                                       "Contrôle automatique des 5 points du visage (yeux, nez, coins de la bouche)."))
+    return results
+
+
 def run_checks(path: Path, comp: Composition, brief: Brief, profile: BrandProfile, plan_warnings: list[str],
                source_id: str, params: dict, background: Image.Image | None) -> list[CheckResult]:
     with Image.open(path) as img:
@@ -296,6 +339,7 @@ def run_checks(path: Path, comp: Composition, brief: Brief, profile: BrandProfil
                                    "Vérifier à l'œil la netteté, les mains et l'absence de texte parasite.",
                                    f"Modèle {params.get('model')} ({params.get('device')}), {gw}×{gh} px agrandi, "
                                    f"graine {params.get('seed')}."))
+        results += loop_checks(params.get("loop"))
     if brief.constraints:
         results.append(CheckResult("Éléments interdits", NON_CONCLUANT,
                                    "À vérifier à l'œil : " + " ; ".join(brief.constraints)))

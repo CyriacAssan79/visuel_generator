@@ -190,11 +190,11 @@ def test_prune_removes_renders_whose_file_was_deleted(conn):
 
 
 def test_gpu_falls_back_to_cpu_when_unavailable(monkeypatch):
-    from komian import backgrounds
-    monkeypatch.setattr(backgrounds, "openvino_devices", lambda: ("CPU",))
-    assert backgrounds.resolve_device("GPU") == "CPU"
-    monkeypatch.setattr(backgrounds, "openvino_devices", lambda: ("CPU", "GPU"))
-    assert backgrounds.resolve_device("gpu") == "GPU"
+    from komian import models_manager
+    monkeypatch.setattr(models_manager, "openvino_devices", lambda: ("CPU",))
+    assert models_manager.resolve_device("GPU") == "CPU"
+    monkeypatch.setattr(models_manager, "openvino_devices", lambda: ("CPU", "GPU"))
+    assert models_manager.resolve_device("gpu") == "GPU"
 
 
 def test_stored_paths_are_portable():
@@ -320,3 +320,75 @@ def test_photo_import_rejects_fake_images(conn):
 def test_path_traversal_refused():
     with pytest.raises(ValueError):
         config.safe_path(config.DIRS["brands"], "..", "..", "secret.txt")
+
+
+# --- IA : aperçu rapide puis version qualité à l'approbation (modèles simulés) ---------------------------
+GOOD_FACE = {"ok": True, "score": 0.8, "width": 100, "sharpness": 300, "confidence": 0.93, "problems": []}
+
+
+@pytest.fixture
+def fake_ai(conn, tmp_path, monkeypatch):
+    """Création et passage en qualité simulés ; `final_action` règle le résultat du contrôle final."""
+    from komian import backgrounds, quality_loop
+    monkeypatch.setitem(config.DIRS, "scenes", tmp_path / "scenes")
+    monkeypatch.setattr(backgrounds, "translate_prompt", lambda text: (text, False))
+    state = {"final_action": True, "quality_calls": 0}
+
+    def create_scene(prompt_en, size, seed):
+        report = {"prompt": prompt_en, "object": "power drill", "question": "Is the person drilling?",
+                  "action_verified": True, "face": GOOD_FACE, "clothed": True, "candidates": 1, "object_added": False,
+                  "seed": seed, "duration_s": 1.0}
+        return Image.new("RGB", size, (120, 110, 100)), report
+
+    def quality_scene(scene, report, size, seed):
+        state["quality_calls"] += 1
+        return Image.new("RGB", size, (125, 115, 105)), {"face": GOOD_FACE, "clothed": True, "action_verified": state["final_action"]}
+
+    monkeypatch.setattr(backgrounds, "create_scene", create_scene)
+    monkeypatch.setattr(quality_loop, "quality_scene", quality_scene)
+    return state
+
+
+def ai_preview(conn):
+    brief_id = db.create_brief(conn, make_brief(visual_direction="Homme qui perce un mur, logo en bas à droite."))
+    return generate(conn, brief_id, "citation_centree", "ia_locale",
+                    {"prompt": "Black man drilling a wall with a power drill"})
+
+
+def test_approving_an_ai_preview_approves_its_quality_version(conn, fake_ai):
+    preview_id = ai_preview(conn)
+    assert statuses(conn, preview_id)["Action demandée"] == "conforme"
+    approval_id = decide(conn, preview_id, "approved", "Awa", acknowledge_inconclusive=True)
+    final_id = db.get_approval(conn, approval_id)["render_id"]
+    assert final_id != preview_id and fake_ai["quality_calls"] == 1
+    final = db.get_render(conn, final_id)
+    assert final["status"] == "approved" and final["layout"] == db.get_render(conn, preview_id)["layout"]
+    assert "aperçu rapide" in db.latest_approval(conn, final_id)["comment"]
+    assert db.get_render(conn, preview_id)["status"] == "rejected"
+    assert export_approved(conn, final_id).exists()
+    with pytest.raises(ExportBlocked):  # l'aperçu, remplacé, ne peut plus être exporté
+        export_approved(conn, preview_id)
+
+
+def test_quality_version_losing_the_action_is_not_approved(conn, fake_ai):
+    from komian.workflow import QualityNotApproved
+    fake_ai["final_action"] = False
+    preview_id = ai_preview(conn)
+    with pytest.raises(QualityNotApproved) as refused:
+        decide(conn, preview_id, "approved", "Awa", acknowledge_inconclusive=True)
+    final = db.get_render(conn, refused.value.render_id)
+    assert final["status"] == "pending" and "Action demandée" in str(refused.value)
+    assert statuses(conn, final["id"])["Action demandée"] == "non_concluant"
+    assert db.get_render(conn, preview_id)["status"] == "pending"
+
+
+def test_cancelling_a_quality_approval_reopens_the_preview(conn, fake_ai):
+    from komian.workflow import cancel_quality_approval
+    preview_id = ai_preview(conn)
+    final_id = db.get_approval(conn, decide(conn, preview_id, "approved", "Awa",
+                                            acknowledge_inconclusive=True))["render_id"]
+    assert cancel_quality_approval(conn, final_id, "Awa") == preview_id
+    assert db.get_render(conn, final_id)["status"] == "rejected"
+    assert db.get_render(conn, preview_id)["status"] == "pending"
+    with pytest.raises(ExportBlocked):
+        export_approved(conn, final_id)

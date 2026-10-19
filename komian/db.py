@@ -207,6 +207,15 @@ def insert_approval(conn, render_id, sha, decision, reviewer, comment) -> int:
     return cur.lastrowid
 
 
+def reopen_render(conn, render_id: str) -> None:
+    """Remet un rendu en attente de validation (l'historique des décisions reste dans `approvals`)."""
+    conn.execute("UPDATE renders SET status = 'pending' WHERE id = ?", (render_id,))
+
+
+def get_approval(conn, approval_id: int) -> sqlite3.Row:
+    return conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+
+
 def missing_render_files(conn) -> list[sqlite3.Row]:
     """Rendus enregistrés dont le fichier n'existe plus (ex. dossier nettoyé à la main)."""
     from .config import from_stored

@@ -1,4 +1,5 @@
 """Orchestrateur : plan de génération, rendu, contrôles, validation, export."""
+import json
 import random
 import shutil
 import time
@@ -10,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 from . import db
-from .backgrounds import SOURCES, GeometricSource
+from .backgrounds import SOURCES, GeometricSource, model_spec, save_scene, scene_to_background
 from .brands import file_sha256, load_profile, missing_assets
 from .checks import ANOMALIE, NON_CONCLUANT, run_checks
 from .compose import TEMPLATES, compose, layout_label, message_mask
@@ -25,6 +26,14 @@ class PlanBlocked(RuntimeError):
 
 class ApprovalRefused(RuntimeError):
     pass
+
+
+class QualityNotApproved(ApprovalRefused):
+    """La version qualité a été créée, mais ses contrôles empêchent de l'approuver automatiquement."""
+
+    def __init__(self, render_id: str, message: str):
+        super().__init__(message)
+        self.render_id = render_id
 
 
 class ExportBlocked(RuntimeError):
@@ -272,14 +281,101 @@ def decide(conn, render_id: str, decision: str, reviewer: str, comment: str = ""
             raise ApprovalRefused("Des contrôles sont non concluants : confirmer qu'ils ont été vérifiés à l'œil.")
     elif decision != "rejected":
         raise ValueError(f"Décision inconnue : {decision}")
+    params = json.loads(render["params"])
+    if decision == "approved" and needs_quality_pass(render, params):
+        return _approve_with_quality(conn, render, params, reviewer.strip(), comment.strip())
     approval_id = db.insert_approval(conn, render_id, render["sha256"], decision, reviewer.strip(), comment.strip())
-    if decision == "approved" and render["batch_id"]:
-        label = layout_label(render["layout"])
-        for sibling in db.batch_renders(conn, render["batch_id"]):
-            if sibling["id"] != render_id and sibling["status"] == "pending":
-                db.insert_approval(conn, sibling["id"], sibling["sha256"], "rejected", reviewer.strip(),
-                                   f"Variante non retenue : « {label} » choisie.")
+    if decision == "approved":
+        _reject_siblings(conn, render, reviewer.strip())
     return approval_id
+
+
+VARIANT_NOT_KEPT = "Variante non retenue"
+SUPERSEDED = "Remplacé par la version qualité."
+QUALITY_NOTE = "Approuvé sur l'aperçu rapide ; version qualité générée automatiquement."
+CANCELLED = "Approbation annulée après examen de la version qualité."
+
+
+def _reject_siblings(conn, render, reviewer: str) -> None:
+    """Le choix d'une variante écarte les autres variantes du même lot encore en attente."""
+    if not render["batch_id"]:
+        return
+    label = layout_label(render["layout"])
+    for sibling in db.batch_renders(conn, render["batch_id"]):
+        if sibling["id"] != render["id"] and sibling["status"] == "pending":
+            db.insert_approval(conn, sibling["id"], sibling["sha256"], "rejected", reviewer,
+                               f"{VARIANT_NOT_KEPT} : « {label} » choisie.")
+
+
+def needs_quality_pass(render, params: dict) -> bool:
+    """Aperçu créé par l'IA en mode rapide : l'approuver déclenche le passage en qualité."""
+    return (render["background_source"] == "ia_locale" and bool(params.get("scene_path"))
+            and not params.get("quality_of"))
+
+
+def _approve_with_quality(conn, render, params: dict, reviewer: str, comment: str) -> int:
+    """Passage en qualité de la scène, même mise en page recomposée, contrôles relancés.
+
+    L'approbation est enregistrée sur le fichier final (celui qui sera exporté), avec la mention qu'elle a été
+    donnée sur l'aperçu. Elle est refusée si la version qualité présente une anomalie ou un nouveau point à
+    vérifier (par exemple l'action perdue) : la version qualité reste alors en attente d'examen.
+    """
+    from .quality_loop import quality_scene
+    started = time.perf_counter()
+    row, brief = db.get_brief(conn, render["brief_id"])
+    profile = load_profile(brief.brand_id)
+    plan = prepare_plan(profile, brief, render["template_id"], "ia_locale")
+    size = FORMATS[brief.format_id]
+    scene = Image.open(from_stored(params["scene_path"])).convert("RGB")
+    attempt = sum(json.loads(r["params"]).get("quality_of") == render["id"] for r in db.list_renders(conn))
+    final_scene, final_report = quality_scene(scene, params["loop"], scene.size,
+                                              params["loop"].get("seed", params["seed"]) + attempt)
+    cache: dict = {}
+
+    def background(s):
+        if s not in cache:
+            cache[s] = scene_to_background(final_scene, s, params)
+        return cache[s]
+
+    comp = compose(profile, brief, size, render["template_id"], background, render["layout"])
+    base = {k: v for k, v in params.items() if k not in ("layers", "layout", "plan_warnings")}
+    final_params = {**base, "quality_of": render["id"], "scene_quality_path": save_scene(final_scene),
+                    "quality_model": model_spec("quality")[0], "loop": {**params["loop"], "final": final_report}}
+    final_id = _save(conn, row, brief, profile, plan, render["template_id"], "ia_locale", final_params, comp,
+                     next(iter(cache.values())), started, render["batch_id"])
+
+    acknowledged = {c["name"] for c in db.get_checks(conn, render["id"]) if c["status"] == NON_CONCLUANT}
+    final_checks = db.get_checks(conn, final_id)
+    blocking = [c["name"] for c in final_checks if c["status"] == ANOMALIE]
+    blocking += [c["name"] for c in final_checks if c["status"] == NON_CONCLUANT and c["name"] not in acknowledged]
+    if blocking:
+        conn.commit()  # la version qualité est conservée, en attente d'examen
+        raise QualityNotApproved(final_id, "Version qualité créée, mais non approuvée automatiquement : "
+                                           f"{', '.join(blocking)}. Examinez-la avant de décider.")
+    final = db.get_render(conn, final_id)
+    approval_id = db.insert_approval(conn, final_id, final["sha256"], "approved", reviewer,
+                                     f"{comment} — {QUALITY_NOTE}" if comment else QUALITY_NOTE)
+    db.insert_approval(conn, render["id"], render["sha256"], "rejected", reviewer, SUPERSEDED)
+    _reject_siblings(conn, final, reviewer)
+    return approval_id
+
+
+def cancel_quality_approval(conn, render_id: str, reviewer: str) -> str | None:
+    """Annule l'approbation d'une version qualité : elle est rejetée, l'aperçu et ses variantes sont rouverts.
+
+    Renvoie l'identifiant de l'aperçu rouvert (None s'il ne s'agit pas d'une version qualité).
+    """
+    render = db.get_render(conn, render_id)
+    preview_id = json.loads(render["params"]).get("quality_of")
+    decide(conn, render_id, "rejected", reviewer, CANCELLED)
+    if preview_id:
+        batch = db.batch_renders(conn, render["batch_id"]) if render["batch_id"] else [db.get_render(conn, preview_id)]
+        for r in batch:
+            last = db.latest_approval(conn, r["id"])
+            if r["status"] == "rejected" and last and (last["comment"] == SUPERSEDED
+                                                       or last["comment"].startswith(VARIANT_NOT_KEPT)):
+                db.reopen_render(conn, r["id"])
+    return preview_id
 
 
 def export_approved(conn, render_id: str) -> Path:

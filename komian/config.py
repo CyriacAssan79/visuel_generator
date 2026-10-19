@@ -8,6 +8,7 @@ DIRS = {
     "sources": DATA / "sources",            # chartes et fichiers importés
     "brands": DATA / "brands",              # profils et ressources de marque
     "tmp": DATA / "renders" / "tmp",        # rendus en cours
+    "scenes": DATA / "renders" / "scenes",  # scènes IA à la taille générée (départ du passage en qualité)
     "pending": DATA / "renders" / "pending",  # rendus en attente de validation
     "approved": DATA / "exports" / "approved",  # exports approuvés
     "db": DATA / "db",

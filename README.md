@@ -25,8 +25,9 @@ conda activate generation_visuel
 pip install -r requirements.txt
 # Accès à la puce graphique Intel depuis WSL (accélération OpenVINO) :
 sudo apt install -y intel-opencl-icd libze-intel-gpu1 libze1 clinfo
-# Mode qualité (Realistic Vision) : conversion unique, environ 10 minutes
+# Realistic Vision (version finale) et sa version rapide (aperçu) : conversions uniques, ~10 minutes chacune
 bash scripts/convert_realistic_vision.sh
+bash scripts/convert_realistic_vision_lcm.sh
 ```
 
 Les autres modèles d'IA se téléchargent au premier usage (environ 3 Go au total) dans `~/.cache/huggingface` et `~/.EasyOCR`. Le cache de compilation OpenVINO est dans `~/.cache/komian/ov_cache`.
@@ -41,10 +42,10 @@ L'interface ne montre que ce qui sert à créer et valider un visuel. Les détai
 2. **🎨 Création** : choix de la mise en page et de l'image de fond.
    - **📷 Ma photo** : photo libre de droits importée.
    - **🔷 Formes aux couleurs de la marque** : aplats aux couleurs de la charte.
-   - **✨ Image créée par l'IA** : mode ⚡ Rapide (environ 6 s, LCM Dreamshaper) pour essayer des idées, ou ✨ Qualité (environ 50 s, Realistic Vision : visages et mains plus fiables) pour la version finale. La scène peut être décrite en français.
+   - **✨ Image créée par l'IA** : la scène, décrite en français ou en anglais, est créée puis contrôlée en silence par une **boucle de contrôle qualité** (jusqu'à 1 min 30). La boucle vérifie le visage et le geste demandé, et ajoute l'outil dans la main si besoin. Voir [Génération d'images](docs/generation-images.md#boucle-de-contrôle-qualité).
 
    Par défaut, trois mises en page sont proposées sur le même fond. Elles dégagent les visages et varient le style et la position du message. Les contradictions entre le brief et la charte sont signalées avant la création.
-3. **✅ Validation** : choix de la mise en page, puis rapport limité aux points à corriger et à vérifier à l'œil ; les contrôles réussis sont repliés. L'approbation est impossible s'il reste un point à corriger. Elle est liée à l'empreinte SHA-256 du fichier exact, et le choix d'une mise en page écarte automatiquement les autres. Une fois le visuel approuvé, **« Préparer le fichier final »** l'exporte et propose son téléchargement.
+3. **✅ Validation** : choix de la mise en page, puis rapport limité aux points à corriger et à vérifier à l'œil ; les contrôles réussis sont repliés. L'approbation est impossible s'il reste un point à corriger. Elle est liée à l'empreinte SHA-256 du fichier exact, et le choix d'une mise en page écarte automatiquement les autres. Pour un visuel créé par l'IA, approuver l'aperçu **crée la version finale en haute qualité** (30 s à 2 min). Elle est recontrôlée, puis approuvée si elle reste conforme, et le valideur peut encore **annuler l'approbation**. Une fois le visuel approuvé, **« Préparer le fichier final »** l'exporte et propose son téléchargement.
 4. **🗂️ Galerie** : tous les visuels de la marque, filtrables par statut (en attente, approuvés, rejetés). « Ouvrir » affiche le visuel dans l'onglet Validation.
 
 Chaque visuel enregistre son brief, sa mise en page et, pour l'IA, le modèle, sa licence, la graine et les descriptions saisie et traduite.
@@ -57,7 +58,10 @@ Si des images sont supprimées à la main du dossier, le bouton **« Retirer de 
 |---|---|
 | `app.py` | Interface Streamlit |
 | `komian/compose.py` | Gabarits : textes exacts, étiquette de série, panneaux, bandeau, logo, icônes |
-| `komian/backgrounds.py` | Sources de fond : photo, formes géométriques, IA locale (OpenVINO / PyTorch), liste d'exclusion |
+| `komian/backgrounds.py` | Sources de fond : photo, formes géométriques, IA locale |
+| `komian/quality_loop.py` | Boucle de contrôle qualité de l'IA : gabarit d'action, candidates, ajout d'objet, passage en qualité |
+| `komian/verifier.py` | Questions au vérificateur (Qwen3-VL) : action faite ? où est la main ? |
+| `komian/models_manager.py` | Chargement des modèles et alternance en mémoire (création / qualité), préchargement |
 | `komian/translate.py` | Traduction français → anglais des descriptions de scène, avec glossaire métier |
 | `komian/checks.py` | Contrôles mesurés sur l'image produite |
 | `komian/ocr.py`, `komian/saliency.py` | Relecture OCR, détection de visages, repérage du sujet |

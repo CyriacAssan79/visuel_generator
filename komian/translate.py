@@ -25,7 +25,8 @@ GLOSSARY = [
     # Expressions et rendu : « smiling » produit des sourires forcés, « realistic photo » un rendu de synthèse.
     (r"(?:au |avec un )?(?:large |grand )?sourire naturel", "gentle natural smile"),
     (r"souriante?s?", "with a gentle natural smile"),
-    (r"photo réaliste|photo-réaliste|photoréaliste", "candid photo, 35mm photograph"),
+    # « réaliste » oriente le modèle vers un rendu 3D ou de synthèse : remplacé par un style photographique
+    (r"(?:une )?(?:photo|image)s? r[ée]alistes?|photo-r[ée]aliste|photor[ée]aliste", "candid photo, 35mm photograph"),
     (r"visage détaillé", "natural skin texture"),
     (r"arrière-plan flou", "blurred background"),
     (r"(?:mur|panneau) perforé", "pegboard"),
@@ -46,6 +47,16 @@ GLOSSARY = [
     (r"tournevis", "screwdriver"),
     (r"lunettes de protection", "safety glasses"),
     (r"arrosoir", "watering can"),
+    # Objets reconnus par la boucle de contrôle de l'action (komian/quality_loop.py, ACTIONS)
+    (r"tuyaux? d'arrosage", "garden hose"),
+    (r"cartons?", "cardboard box"),
+    (r"pinceaux?", "paintbrush"),
+    (r"marteaux?", "hammer"),
+    (r"scies?", "saw"),
+    (r"pelles?", "shovel"),
+    (r"tondeuses?(?: à gazon)?", "lawn mower"),
+    (r"brouettes?", "wheelbarrow"),
+    (r"échelles?", "ladder"),
     (r"désaturée?s?", "desaturated"),
 ]
 _GLOSSARY = [(re.compile(rf"\b{pattern}\b", re.IGNORECASE), english) for pattern, english in GLOSSARY]
