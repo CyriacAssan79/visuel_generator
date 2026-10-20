@@ -231,14 +231,27 @@ def prune_missing_renders(conn) -> tuple[int, int]:
     """
     removed = kept = 0
     for r in missing_render_files(conn):
-        if conn.execute("SELECT 1 FROM exports WHERE render_id = ?", (r["id"],)).fetchone():
+        if is_exported(conn, r["id"]):
             kept += 1
             continue
-        conn.execute("DELETE FROM checks WHERE render_id = ?", (r["id"],))
-        conn.execute("DELETE FROM approvals WHERE render_id = ?", (r["id"],))
-        conn.execute("DELETE FROM renders WHERE id = ?", (r["id"],))
+        delete_render_rows(conn, r["id"])
         removed += 1
     return removed, kept
+
+
+def is_exported(conn, render_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM exports WHERE render_id = ?", (render_id,)).fetchone() is not None
+
+
+def exported_render_ids(conn) -> set[str]:
+    return {r["render_id"] for r in conn.execute("SELECT DISTINCT render_id FROM exports")}
+
+
+def delete_render_rows(conn, render_id: str) -> None:
+    """Retire un rendu de la base, avec ses contrôles et décisions (les fichiers sont gérés par l'appelant)."""
+    conn.execute("DELETE FROM checks WHERE render_id = ?", (render_id,))
+    conn.execute("DELETE FROM approvals WHERE render_id = ?", (render_id,))
+    conn.execute("DELETE FROM renders WHERE id = ?", (render_id,))
 
 
 def latest_approval(conn, render_id: str) -> sqlite3.Row | None:

@@ -382,6 +382,45 @@ def cancel_quality_approval(conn, render_id: str, reviewer: str) -> str | None:
     return preview_id
 
 
+class DeleteRefused(RuntimeError):
+    pass
+
+
+def linked_versions(conn, render_id: str) -> list:
+    """Le visuel et ses versions liées : l'aperçu et sa (ses) version(s) finale(s) en haute qualité."""
+    render = db.get_render(conn, render_id)
+    preview_id = json.loads(render["params"]).get("quality_of") or render_id
+    rows = [r for r in db.list_renders(conn)
+            if r["id"] == preview_id or json.loads(r["params"]).get("quality_of") == preview_id]
+    return rows or [render]
+
+
+def delete_render(conn, render_id: str) -> list[str]:
+    """Supprime un visuel de la galerie : fichier, contrôles, décisions, et ses versions liées (aperçu / finale).
+
+    Un visuel exporté n'est jamais supprimé : la trace de ce qui a été livré doit rester. Les scènes créées par
+    l'IA ne sont effacées que si plus aucun visuel ne les utilise (les variantes d'un lot partagent la même).
+    Renvoie les identifiants supprimés.
+    """
+    rows = linked_versions(conn, render_id)
+    if any(db.is_exported(conn, r["id"]) for r in rows):
+        raise DeleteRefused("Ce visuel a déjà été téléchargé en version finale : il reste dans l'historique.")
+    scenes = set()
+    for r in rows:
+        params = json.loads(r["params"])
+        scenes.update(params[k] for k in ("scene_path", "scene_quality_path") if params.get(k))
+        db.delete_render_rows(conn, r["id"])
+        if r["file_path"]:
+            from_stored(r["file_path"]).unlink(missing_ok=True)
+    still_used = set()
+    for r in conn.execute("SELECT params FROM renders"):
+        params = json.loads(r["params"])
+        still_used.update(params.get(k) for k in ("scene_path", "scene_quality_path"))
+    for scene in scenes - still_used:
+        from_stored(scene).unlink(missing_ok=True)
+    return [r["id"] for r in rows]
+
+
 def export_approved(conn, render_id: str) -> Path:
     render = db.get_render(conn, render_id)
     approval = db.latest_approval(conn, render_id)

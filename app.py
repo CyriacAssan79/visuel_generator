@@ -18,9 +18,9 @@ from komian.compose import TEMPLATES, layout_label
 from komian.config import FORMATS, from_stored, to_stored
 from komian.models import Brief
 from komian.storage import ImportRejected, import_image
-from komian.workflow import (ApprovalRefused, ExportBlocked, PlanBlocked, QualityNotApproved,
-                             cancel_quality_approval, decide, export_approved, generate, generate_variants,
-                             needs_quality_pass, prepare_plan)
+from komian.workflow import (ApprovalRefused, DeleteRefused, ExportBlocked, PlanBlocked, QualityNotApproved,
+                             cancel_quality_approval, decide, delete_render, export_approved, generate,
+                             generate_variants, needs_quality_pass, prepare_plan)
 
 # --- Libellés affichés -----------------------------------------------------------
 OBJECTIVES = ["motiver", "promouvoir", "informer", "recruter", "sensibiliser", "autre"]
@@ -609,6 +609,32 @@ def page_validation():
 
 
 # --- Galerie ---------------------------------------------------------------------
+def delete_button(container, r, exported: bool) -> None:
+    """Suppression d'un visuel, après confirmation. Un visuel déjà téléchargé reste dans l'historique."""
+    if exported:
+        container.button("Supprimer", key=f"del_{r['id']}", width="stretch", disabled=True,
+                         help="Déjà téléchargé en version finale : conservé dans l'historique.")
+        return
+    with container.popover("Supprimer", width="stretch"):
+        st.markdown("**Supprimer ce visuel ?**")
+        final = json.loads(r["params"]).get("quality_of")
+        st.caption("Le fichier, ses contrôles et ses décisions sont effacés définitivement"
+                   + (", ainsi que l'aperçu dont il est issu." if final else ".")
+                   + (" Il est approuvé." if r["status"] == "approved" else ""))
+        if st.button("Supprimer définitivement", key=f"del_ok_{r['id']}", type="primary", width="stretch"):
+            try:
+                with db.connect() as conn:
+                    removed = delete_render(conn, r["id"])
+            except DeleteRefused as exc:
+                st.error(str(exc))
+                return
+            st.session_state.last_batch = [i for i in st.session_state.last_batch if i not in removed]
+            if st.session_state.render_id in removed:
+                st.session_state.render_id = None
+            st.session_state.flash = "Visuel supprimé."
+            st.rerun()
+
+
 def page_gallery():
     ui.page_head("Production", "Galerie", f"Tous les visuels créés pour {profile.brand_name}.")
     client_filter()
@@ -626,6 +652,7 @@ def page_gallery():
 
     with db.connect() as conn:
         rows = [r for r in db.list_renders(conn, brand_id) if r["status"] != "error"]
+        exported = db.exported_render_ids(conn)
     replaced = superseded_ids(rows)
     rows = [r for r in rows if r["id"] not in replaced]  # seule la version finale reste visible
     if not rows:
@@ -648,9 +675,11 @@ def page_gallery():
                 show_image(st, r["file_path"])
                 ui.status_badge(st, r["status"])
                 st.caption(f"« {short(brief_text(r), 50)} »  \n{fmt_date(r['created_at'])}")
-                if st.button("Ouvrir", key=f"open_{r['id']}", width="stretch"):
+                b1, b2 = st.columns(2)
+                if b1.button("Ouvrir", key=f"open_{r['id']}", width="stretch"):
                     st.session_state.render_id = r["id"]
                     st.switch_page(PAGES["validation"])
+                delete_button(b2, r, r["id"] in exported)
     if len(matching) > limit:
         if st.button(f"Afficher plus ({len(matching) - limit} restant(s))"):
             st.session_state.gallery_limit = limit + 24

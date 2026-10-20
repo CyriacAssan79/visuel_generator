@@ -251,6 +251,15 @@ button[data-testid="stBaseButton-segmented_controlActive"] p { color: #fff; }
 .st-key-back button { padding: 0; min-height: 0; }
 .st-key-back button p { text-transform: none !important; letter-spacing: 0 !important; font-weight: 500 !important; font-size: 13px !important; color: var(--g600); }
 
+[data-testid="stPopoverButton"] p {
+  font-weight: 600 !important; font-size: 12.5px !important; letter-spacing: 0.06em; text-transform: uppercase;
+}
+[data-testid="stPopoverButton"] { min-height: 40px; border-radius: 2px; background: transparent; }
+
+/* Suppression : bouton de confirmation en rouge */
+[class*="st-key-del_ok_"] button { background: var(--red); border-color: var(--red); }
+[class*="st-key-del_ok_"] button:hover { background: #c92f3b; border-color: #c92f3b; }
+
 /* Vignettes de la galerie */
 [class*="st-key-tile"] { padding: 0 !important; gap: 0; overflow: hidden; background: #fff; border-color: var(--g200) !important; }
 [class*="st-key-tile"] [data-testid="stImage"] { background: var(--g850); }

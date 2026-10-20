@@ -189,6 +189,47 @@ def test_prune_removes_renders_whose_file_was_deleted(conn):
     assert db.get_checks(conn, ids[1]) == []
 
 
+def test_delete_render_removes_file_and_records(conn):
+    from komian.workflow import DeleteRefused, delete_render
+    brief_id = db.create_brief(conn, make_brief())
+    _, ids = generate_variants(conn, brief_id, "citation_centree", "geometrique")
+    path = config.from_stored(db.get_render(conn, ids[1])["file_path"])
+    assert delete_render(conn, ids[1]) == [ids[1]]
+    assert not path.exists()
+    assert db.get_checks(conn, ids[1]) == []
+    assert ids[1] not in [r["id"] for r in db.list_renders(conn)]
+    decide(conn, ids[0], "approved", "Awa", acknowledge_inconclusive=True)
+    export_approved(conn, ids[0])
+    with pytest.raises(DeleteRefused):  # un visuel livré reste tracé
+        delete_render(conn, ids[0])
+    assert config.from_stored(db.get_render(conn, ids[0])["file_path"]).exists()
+
+
+def test_delete_render_takes_quality_versions_and_keeps_shared_scene(conn, tmp_path, monkeypatch):
+    import json
+    from komian.workflow import delete_render
+    monkeypatch.setitem(config.DIRS, "scenes", tmp_path / "scenes")
+    brief_id = db.create_brief(conn, make_brief())
+    _, ids = generate_variants(conn, brief_id, "citation_centree", "geometrique")
+    scene = tmp_path / "scenes" / "s.png"
+    scene.parent.mkdir()
+    Image.new("RGB", (8, 8)).save(scene)
+    final = tmp_path / "pending" / "final.png"
+    Image.new("RGB", (8, 8)).save(final)
+    for rid in ids:  # les variantes d'un lot partagent la scène créée par l'IA
+        conn.execute("UPDATE renders SET params = json_set(params, '$.scene_path', ?) WHERE id = ?",
+                     (str(scene), rid))
+    row = db.get_render(conn, ids[0])
+    db.insert_render(conn, "final1", row["brief_id"], row["template_id"], "ia_locale",
+                     {**json.loads(row["params"]), "quality_of": ids[0]}, final, "x", "pending")
+    assert sorted(delete_render(conn, "final1")) == sorted([ids[0], "final1"])  # aperçu et finale ensemble
+    assert not final.exists()
+    assert scene.exists()  # encore utilisée par les autres variantes
+    delete_render(conn, ids[1])
+    delete_render(conn, ids[2])
+    assert not scene.exists()
+
+
 def test_gpu_falls_back_to_cpu_when_unavailable(monkeypatch):
     from komian import models_manager
     monkeypatch.setattr(models_manager, "openvino_devices", lambda: ("CPU",))
