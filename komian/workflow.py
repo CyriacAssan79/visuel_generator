@@ -62,6 +62,9 @@ def prepare_plan(profile: BrandProfile, brief: Brief, template_id: str, source_i
         plan.blocking.append(f"Format inconnu : {brief.format_id}")
     if template_id not in TEMPLATES:
         plan.blocking.append(f"Gabarit inconnu : {template_id}")
+    elif template_id not in profile.templates:
+        plan.blocking.append(f"Le gabarit « {TEMPLATES[template_id]['label']} » n'est pas prévu pour "
+                             f"{profile.brand_name}.")
     if source_id not in SOURCES:
         plan.blocking.append(f"Source d'image inconnue : {source_id}")
     for missing in missing_assets(profile):
@@ -71,7 +74,7 @@ def prepare_plan(profile: BrandProfile, brief: Brief, template_id: str, source_i
         f"Texte exact : « {brief.exact_visual_text} »",
         f"Accroche : « {brief.headline} »",
         f"Logo officiel, {brief.logo_position}",
-        f"Police {profile.fonts['bold'].split('/')[-1].split('-')[0]}",
+        f"Police {profile.font_name}",
         profile.primary_color_rule,
         f"Orthographe : {profile.official_spelling}",
     ]
@@ -91,7 +94,8 @@ def prepare_plan(profile: BrandProfile, brief: Brief, template_id: str, source_i
         plan.warnings.append("La direction évoque une photo alors que la source choisie est « formes géométriques ».")
     if source_id == "photo" and any(w in direction for w in SHAPES_WORDS):
         plan.warnings.append("La direction évoque des formes géométriques alors que la source choisie est une photo.")
-    if template_id in TEMPLATES and TEMPLATES[template_id]["logo_position"] != brief.logo_position:
+    if (template_id in TEMPLATES and not TEMPLATES[template_id].get("logo_fixed")
+            and TEMPLATES[template_id]["logo_position"] != brief.logo_position):
         plan.warnings.append(f"Le gabarit place le logo {TEMPLATES[template_id]['logo_position']}, "
                              f"le brief demande {brief.logo_position}.")
     return plan
@@ -195,7 +199,7 @@ def placement_score(background: Image.Image, canvas_size, mask, sal, faces=(), s
     face_cover = max((mask_face_cover(f, mask) for f in faces), default=0.0)
     penalty = 1000 * face_cover if face_cover > FACE_COVER_TOLERANCE else 0
     brightness = round(float(lum[mask].mean()) if mask.any() else 0.0, 1)
-    if style == "direct":
+    if style in ("direct", "degrade"):  # texte blanc (et rouge) posé sur la photo
         penalty += max(0.0, brightness - DIRECT_TEXT_MAX_LUMINANCE) * 0.6 + calm * 0.4
     return {"score": round(penalty + covered * 100 + calm * 0.3, 1), "subject_covered": round(covered, 3),
             "zone_busyness": calm, "zone_brightness": brightness, "face_covered": round(face_cover, 2)}

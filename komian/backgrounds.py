@@ -103,14 +103,18 @@ SCENE_HINTS = [
     (("cuisine",), "cuisine moderne et lumineuse"),
     (("intérieur", "maison", "salon"), "salon moderne et chaleureux"),
     (("peinture",), "mur fraîchement peint avec des pots de peinture et des rouleaux"),
+    (("chantier", "btp", "construction", "ouvrier"),
+     "chantier de construction, immeuble en béton et échafaudages, ouvrier en gilet orange et casque blanc"),
 ]
 DEFAULT_SCENE = "atelier de bricolage, mur perforé avec des outils, établi en bois"
 PROMPT_STYLE = "lumière naturelle chaude, photo réaliste, arrière-plan flou"
 
 
-def suggest_prompt(visual_direction: str) -> str:
+def suggest_prompt(visual_direction: str, default_scene: str | None = None) -> str:
+    """Scène proposée à partir de la direction artistique ; sinon la scène par défaut de la marque."""
     direction = visual_direction.lower()
-    scene = next((s for words, s in SCENE_HINTS if any(w in direction for w in words)), DEFAULT_SCENE)
+    scene = next((s for words, s in SCENE_HINTS if any(w in direction for w in words)),
+                 default_scene or DEFAULT_SCENE)
     return f"{scene}, {PROMPT_STYLE}"
 
 

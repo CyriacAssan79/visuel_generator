@@ -238,7 +238,7 @@ button[data-testid="stBaseButton-segmented_controlActive"] p { color: #fff; }
 .k-mono { font-family: var(--mono); font-size: 12px; color: var(--g600); }
 .k-asset { border: 1px solid var(--g200); background: #fff; }
 .k-asset .pv { aspect-ratio: 4/3; display: grid; place-items: center; overflow: hidden; background: var(--g100); }
-.k-asset .pv img { max-width: 80%; max-height: 70%; object-fit: contain; }
+.k-asset .pv img { width: 80%; height: 80%; object-fit: contain; }
 .k-asset .pv img.cover { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; }
 .k-asset .info { padding: 8px 10px; font-size: 12.5px; }
 .k-asset .info b { font-weight: 600; display: block; }
@@ -348,7 +348,8 @@ def font_face(family: str, path: Path, weight: int = 400, style: str = "normal")
     if not path.is_file():
         return ""
     data = base64.b64encode(path.read_bytes()).decode()
-    return (f"@font-face {{ font-family: '{family}'; src: url(data:font/ttf;base64,{data}) format('truetype'); "
+    mime, fmt = ("font/otf", "opentype") if path.suffix.lower() == ".otf" else ("font/ttf", "truetype")
+    return (f"@font-face {{ font-family: '{family}'; src: url(data:{mime};base64,{data}) format('{fmt}'); "
             f"font-weight: {weight}; font-style: {style}; }}")
 
 

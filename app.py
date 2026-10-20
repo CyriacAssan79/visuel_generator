@@ -148,7 +148,10 @@ def brief_form():
 
         st.subheader("Le contexte")
         c1, c2, c3 = st.columns(3)
-        series = c1.text_input("Série", current.series if current else "Lundi motivation")
+        series = c1.text_input("Série", current.series if current else next(iter(profile.series_tags), ""),
+                               help="Une série connue de la charte affiche son étiquette (ex. "
+                                    + " ; ".join(f"« {s} »" for s in profile.series_tags) + ")."
+                               if profile.series_tags else None)
         objective = c2.selectbox("Objectif", OBJECTIVES, OBJECTIVES.index(current.objective) if current else 0,
                                  format_func=str.capitalize)
         format_id = c3.selectbox("Format", list(FORMATS),
@@ -229,7 +232,7 @@ def step_creation():
         st.caption(f"{format_label(brief.format_id)} · {brief.series or 'hors série'}")
 
         st.subheader("Mise en page")
-        template_id = st.selectbox("Modèle de mise en page", list(TEMPLATES),
+        template_id = st.selectbox("Modèle de mise en page", [t for t in profile.templates if t in TEMPLATES],
                                    format_func=lambda t: TEMPLATES[t]["label"], label_visibility="collapsed")
 
         st.subheader("Image de fond")
@@ -277,7 +280,7 @@ def step_creation():
                     st.warning("Ce poste fonctionne en mode ralenti : la création prendra environ 10 fois plus "
                                "de temps que prévu.")
             params["prompt"] = st.text_area(
-                "Décrivez la scène", suggest_prompt(brief.visual_direction), key=f"prompt_{row['id']}", height=110,
+                "Décrivez la scène", suggest_prompt(brief.visual_direction, profile.default_scene), key=f"prompt_{row['id']}", height=110,
                 help="En français ou en anglais. Indiquez qui (âge, tenue), quoi (une action simple), où, le cadrage "
                      "et la lumière. N'écrivez ni texte ni logo : ils sont ajoutés ensuite.")
             with st.expander("Conseils pour une belle image", icon=":material/lightbulb:"):
@@ -389,7 +392,7 @@ def charte_panel(p) -> None:
     """Rappel de la charte appliquée automatiquement, à côté du brief (comme dans KÔMIAN Studio)."""
     logo = next((asset_path(p, lg.file) for lg in p.logos if not lg.on_dark_background), None)
     colors = [c.hex for c in p.primary_colors.values()]
-    fonts = ", ".join(sorted({Path(f).stem.split("-")[0] for f in p.fonts.values()}))
+    fonts = p.font_name
     logo_html = (f"<div style='margin-top:8px;background:var(--g100);padding:8px 10px;display:inline-block'>"
                  f"<img src='{ui.data_uri(logo)}' alt='Logo' style='height:22px'></div>"
                  if logo and logo.is_file() else "")
@@ -405,6 +408,10 @@ def charte_panel(p) -> None:
         if p.local_market:
             html += ui.setting("Signature locale", " · ".join(
                 x for x in [p.local_market.tagline, p.local_market.handle, p.local_market.address] if x))
+        if p.contact:
+            html += ui.setting("Coordonnées", " · ".join(
+                x for x in [p.contact.whatsapp and f"WhatsApp {p.contact.whatsapp}", p.contact.phone,
+                            p.contact.website] if x))
         st.markdown(html, unsafe_allow_html=True)
         if p.unknowns:
             st.warning(f"{len(p.unknowns)} point(s) de charte restent à confirmer.")
@@ -777,7 +784,7 @@ def client_sheet(b: str):
             family = f"brand-{b}"
             faces = "".join(ui.font_face(family, asset_path(p, f), *FONT_WEIGHTS.get(k, (400, "normal")))
                             for k, f in p.fonts.items() if k in ("regular", "bold"))
-            names = sorted({Path(f).stem.split("-")[0] for f in p.fonts.values()})
+            names = [p.font_name]
             sample = p.series_tags and next(iter(p.series_tags)) or p.brand_name
             st.html(f"<style>{faces}</style>")
             st.markdown(ui.card_head("Typographies", ", ".join(names))
@@ -806,7 +813,10 @@ def client_sheet(b: str):
             m = p.local_market
             with st.container(key="card_market"):
                 html = ui.card_head(f"Signature locale · {m.market}")
-                for title, value in [("Mention", m.tagline), ("Site / réseaux", m.handle), ("Adresse", m.address)]:
+                ct = p.contact
+                for title, value in [("Mention", m.tagline), ("Site / réseaux", m.handle), ("Adresse", m.address),
+                                     ("WhatsApp", ct and ct.whatsapp), ("Téléphone", ct and ct.phone),
+                                     ("Site web", ct and ct.website), ("Signature", ct and ct.slogan)]:
                     if value:
                         html += ui.setting(title, value)
                 st.markdown(html, unsafe_allow_html=True)

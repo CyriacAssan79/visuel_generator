@@ -95,8 +95,11 @@ class Composer:
     # --- éléments ------------------------------------------------------------
 
     def text(self, canvas, text, role, style, color_name, box, max_size, min_size,
-             align="center", valign="center", gap=0.12, shadow=False):
+             align="center", valign="center", gap=0.12, shadow=False, case=None):
+        """`case="upper"` : composé en capitales (charte), le contrôle compare alors au brief mis en capitales."""
         x, y, w, h = box
+        if case == "upper":
+            text = text.upper()
         size, lines = self.fit(text, style, w, h, max_size, min_size, gap)
         fitted = size is not None
         if not fitted:  # jamais tronqué : on affiche à la taille minimale et on le signale
@@ -133,15 +136,17 @@ class Composer:
             "kind": "text", "role": role, "text": text, "lines": lines, "style": style,
             "font_file": self.profile.fonts[style], "size": size, "color_name": color_name,
             "color": color, "box": [x, y, w, h], "bbox": bbox, "fitted": fitted,
-            "background_mean": bg_mean, "background_std": bg_std, "shadow": shadow,
+            "background_mean": bg_mean, "background_std": bg_std, "shadow": shadow, "case": case,
         })
         return bbox
 
     def rect(self, canvas, box, color_name, role):
         x0, y0, x1, y1 = (round(v) for v in box)
         ImageDraw.Draw(canvas).rectangle((x0, y0, x1, y1), fill=self.color(color_name))
+        inset = min(3, (x1 - x0) // 2, (y1 - y0) // 2)  # un filet fin est échantillonné en son milieu
         self.layers.append({"kind": "shape", "role": role, "color_name": color_name, "bbox": (x0, y0, x1, y1),
-                            "color": self.color(color_name), "sample_points": [(x0 + 3, y0 + 3), (x1 - 3, y1 - 3)]})
+                            "color": self.color(color_name),
+                            "sample_points": [(x0 + inset, y0 + inset), (x1 - inset, y1 - inset)]})
 
     def fading_panel(self, canvas, box, role, solid=0.68):
         """Panneau blanc opaque sur `solid` de sa largeur, puis fondu vers la transparence (références)."""
@@ -215,6 +220,7 @@ class Composer:
         bbox = (x + vb[0], top + vb[1], x + vb[2], top + vb[3])
         self.layers.append({"kind": "logo", "logo_id": logo_id, "file": asset.file,
                             "sha256": file_sha256(path), "status": asset.status, "bbox": bbox,
+                            "paste": [x, top, width],
                             "background_mean": bg_mean, "background_std": bg_std})
         if asset.status != "confirmé":
             self.warnings.append(f"Logo « {logo_id} » au statut « {asset.status} ».")
@@ -487,7 +493,8 @@ def _message_photo(c: "Composer", background) -> Image.Image:
     return canvas
 
 
-STYLE_LABELS = {"panneau": "Panneau blanc", "direct": "Texte sur photo", "blocs": "Blocs rouge/vert"}
+STYLE_LABELS = {"panneau": "Panneau blanc", "direct": "Texte sur photo", "blocs": "Blocs rouge/vert",
+                "degrade": "Dégradé bleu"}
 
 
 def layout_label(layout: str | None) -> str:
@@ -520,6 +527,11 @@ TEMPLATES = {
     "citation_centree": {"label": "Citation sur carte + bandeau rouge", "render": _citation_centree,
                          "logo_position": "bas à droite", "layouts": ["centre", "gauche", "droite"]},
 }
+
+# Gabarits propres à d'autres marques (chaque profil déclare les siens dans `templates`).
+from .gabarits_bernabe import BERNABE_TEMPLATES  # noqa: E402  (utilise les outils définis ci-dessus)
+
+TEMPLATES.update(BERNABE_TEMPLATES)
 
 # Rôles des couches qui forment le « groupe de message » (pour mesurer le fond qu'elles recouvrent).
 MESSAGE_ROLES = ("texte_exact", "accroche", "bloc_titre", "carte_citation", "cadre_citation", "serie",

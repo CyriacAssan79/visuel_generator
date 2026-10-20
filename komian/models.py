@@ -39,6 +39,20 @@ class LocalMarket(BaseModel):
     source: str
 
 
+class Contact(BaseModel):
+    """Coordonnées affichées sur les visuels (pied de page, baseline)."""
+    whatsapp: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    slogan: str | None = None
+    status: Status = "confirmé"
+    source: str | None = None
+
+
+# Gabarits historiques de Mr.Bricolage : valeur par défaut pour les profils qui n'en déclarent pas.
+LEGACY_TEMPLATES = ["message_photo", "bandeau_titre_haut", "bandeau_blocs", "citation_centree"]
+
+
 class BrandProfile(BaseModel):
     brand_id: str
     brand_name: str
@@ -57,8 +71,20 @@ class BrandProfile(BaseModel):
     secondary_colors: list[Color]
     secondary_colors_status: Status
     local_market: LocalMarket | None = None
+    contact: Contact | None = None
     iconography_themes: list[str]
+    font_family: str | None = Field(None, description="Nom affiché de la police (sinon déduit du fichier « bold »)")
+    templates: list[str] = Field(default_factory=lambda: list(LEGACY_TEMPLATES),
+                                 description="Gabarits de mise en page propres à la marque")
+    uppercase_titles: bool = Field(False, description="Titres composés en capitales (texte du brief inchangé)")
+    default_scene: str | None = Field(None, description="Scène proposée par défaut à l'IA pour cette marque")
     unknowns: list[str]
+
+    @property
+    def font_name(self) -> str:
+        if self.font_family:
+            return self.font_family
+        return self.fonts["bold"].split("/")[-1].split("-")[0]
 
     def logo(self, logo_id: str) -> LogoAsset:
         for logo in self.logos:

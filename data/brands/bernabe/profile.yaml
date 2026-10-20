@@ -1,0 +1,93 @@
+# Profil extrait du « Manuel d'identité visuelle » Bernabé (data/sources/bernabe/BERNABE CHARTE GRAPHIQUE bis .pdf)
+# et de trois publications Instagram/Facebook fournies le 2026-10-19 (marché Côte d'Ivoire).
+#
+# Repères de la charte :
+#   - logo emblème : carré bleu + symbole en losanges + « Bernabé », indissociables (p. 7) ;
+#     variantes verticale et horizontale (p. 8), variante pays « CÔTE D'IVOIRE » (p. 12) ;
+#     sur fond de couleur ou photo : carré bleu et filet blanc autour du symbole (p. 15) ;
+#   - couleurs (p. 13) : bleu Pantone 2757 C / RAL 5002, rouge Pantone 485 C / RAL 3018 ;
+#     les fichiers vectoriels du logo utilisent un bleu très proche (27, 36, 99) ;
+#   - typographie (p. 27) : Futura Std pour titres, sous-titres et textes courts ;
+#   - aucun gabarit réseaux sociaux : l'affiche verticale petit format (p. 48-49) sert de base au gabarit
+#     « affiche » ; les publications existantes servent de base au gabarit « bandeau ».
+# Logos : scripts/extract_bernabe_logos.py (rendu vectoriel de la charte).
+brand_id: bernabe
+brand_name: "Bernabé"
+source_document: "Manuel d'identité visuelle Bernabé"
+source_version_status: "confirmé"
+
+official_spelling: "Bernabé"
+forbidden_spellings: []
+internal_only_abbreviations: []
+
+logos:
+  - id: horizontal
+    file: logos/logo_horizontal.png
+    description: "Variante horizontale officielle (charte p. 8), fond transparent"
+    status: "confirmé"
+  - id: vertical
+    file: logos/logo_vertical.png
+    description: "Variante verticale officielle (charte p. 8)"
+    status: "confirmé"
+  - id: vertical_cote_ivoire
+    file: logos/logo_vertical_cote_ivoire.png
+    description: "Variante verticale + nom du pays (charte p. 12)"
+    status: "confirmé"
+  - id: cartouche_blanc
+    file: logos/logo_cartouche_blanc.png
+    description: "Variante pays pour fond de couleur : filet blanc, « CÔTE D'IVOIRE » en blanc (charte p. 15, publications)"
+    status: "dérivé"
+    on_dark_background: true
+  - id: horizontal_blanc
+    file: logos/logo_horizontal_blanc.png
+    description: "Variante horizontale pour fond bleu : « Bernabé » en blanc, filet blanc (charte p. 15 et p. 49)"
+    status: "dérivé"
+    on_dark_background: true
+
+font_family: "Futura Std"
+fonts:
+  light: fonts/FuturaStdLight.otf
+  regular: fonts/FuturaStdBook.otf
+  italic: fonts/FuturaStdBookOblique.otf
+  medium: fonts/FuturaStdMedium.otf
+  heavy: fonts/FuturaStdHeavy.otf
+  bold: fonts/FuturaStdBold.otf
+  bold_italic: fonts/FuturaStdBoldOblique.otf
+  extra_bold: fonts/FuturaStdExtraBold.otf
+
+primary_colors:
+  bleu: {name: bleu, hex: "#182865", rgb: [24, 40, 101], pantone: "2757 C", cmyk: [100, 85, 0, 40]}
+  rouge: {name: rouge, hex: "#E30613", rgb: [227, 6, 19], pantone: "485 C", cmyk: [0, 100, 100, 0]}
+primary_color_rule: "Bleu Pantone 2757 C et rouge Pantone 485 C, les deux couleurs du logo, en aplats."
+overlays_allowed: true
+
+series_tags:
+  "Bon début de semaine": ["BON DÉBUT DE SEMAINE"]
+  "Bon week-end": ["BON WEEK-END"]
+
+secondary_colors_status: "confirmé"
+secondary_colors: []
+
+local_market:
+  market: "Côte d'Ivoire"
+  tagline: "Depuis 1953"
+  status: "à confirmer"
+  source: "Relevé sous le logo des publications ; absent de la charte"
+
+contact:
+  whatsapp: "05 84 35 10 34"
+  website: "bernabeafrique.com"
+  slogan: "Donnons aux Hommes les moyens de bâtir l'avenir"
+  source: "Numéro WhatsApp des publications, retenu le 2026-10-19 ; site et signature de la charte"
+
+iconography_themes: ["chantier", "BTP", "outillage", "équipements de protection", "matériaux de construction",
+                     "matériel industriel"]
+
+templates: [bernabe_bandeau, bernabe_affiche]
+uppercase_titles: true
+default_scene: "chantier de construction en Côte d'Ivoire, immeuble en béton et échafaudages, ouvrier en gilet orange et casque blanc"
+
+unknowns:
+  - "Logos blancs (cartouche et horizontal) dérivés de la charte : à valider par le responsable de marque."
+  - "« Depuis 1953 » sous le logo et dégradé bleu sur photo : relevés sur les publications, absents de la charte."
+  - "Bodoni Std (police du texte courant) non fournie : les visuels sont composés en Futura Std uniquement."

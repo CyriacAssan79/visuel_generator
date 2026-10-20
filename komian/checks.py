@@ -78,12 +78,17 @@ def check_exact_text(comp: Composition, brief: Brief) -> CheckResult:
     for label, prefix, expected in fields:
         layers = _texts(comp, prefix)
         drawn = normalize(" ".join(" ".join(l["lines"]) for l in layers))
+        upper = bool(layers) and all(l.get("case") == "upper" for l in layers)
+        wanted = normalize(expected).upper() if upper else normalize(expected)
         if not layers:
             problems.append(f"{label} absent du visuel")
-        elif drawn != normalize(expected):
-            problems.append(f"{label} : « {drawn} » au lieu de « {normalize(expected)} »")
+        elif drawn != wanted:
+            problems.append(f"{label} : « {drawn} » au lieu de « {wanted} »")
     if problems:
         return CheckResult("Textes exacts", ANOMALIE, " ; ".join(problems))
+    if any(l.get("case") == "upper" for l in _texts(comp, "")):
+        return CheckResult("Textes exacts", CONFORME, "Identiques au brief, composés en capitales comme le veut la "
+                                                      "charte (accents et ponctuation conservés).")
     return CheckResult("Textes exacts", CONFORME, "Identiques au brief (casse, accents, ponctuation).")
 
 
@@ -185,23 +190,53 @@ def check_faces(comp: Composition, background: Image.Image, size) -> CheckResult
                        "Détection automatique : un visage de profil ou partiel peut échapper au détecteur.")
 
 
+def logo_visible(image: Image.Image, layer: dict, path: Path) -> bool:
+    """Le logo se retrouve-t-il tel quel dans l'image ? Pixels opaques du fichier, redimensionné comme à la
+    composition, comparés à l'image produite (sans couche « paste » : ancien critère de clarté)."""
+    if "paste" not in layer:
+        region = image.crop(layer["bbox"]).convert("L")
+        return sum(1 for v in region.get_flattened_data() if v > 230) / max(1, region.width * region.height) > 0.15
+    x, y, width = layer["paste"]
+    with Image.open(path) as f:
+        logo = f.convert("RGBA")
+    logo = logo.resize((width, round(logo.height * width / logo.width)), Image.Resampling.LANCZOS)
+    region = image.crop((x, y, x + logo.width, y + logo.height))
+    import numpy as np
+    a, b = np.asarray(logo, dtype=int), np.asarray(region.convert("RGB"), dtype=int)
+    opaque = a[:, :, 3] == 255
+    if not opaque.any():
+        return False
+    same = np.abs(a[:, :, :3] - b).max(axis=2) <= 8
+    return float(same[opaque].mean()) >= 0.9
+
+
+def logo_place(bbox, size) -> str:
+    W, H = size
+    x0, y0, x1, y1 = bbox
+    cx = (x0 + x1) / 2
+    side = "au centre" if abs(cx - W / 2) < W * 0.06 else ("à droite" if cx > W / 2 else "à gauche")
+    return f"{'bas' if (y0 + y1) / 2 > H / 2 else 'haut'} {side}"
+
+
 def check_logo(comp: Composition, image: Image.Image, brief: Brief, profile: BrandProfile) -> CheckResult:
-    """Logo officiel présent, visible et placé comme demandé."""
+    """Logo officiel présent, visible et placé comme demandé (ou comme l'impose le gabarit)."""
     from .brands import asset_path, file_sha256
+    from .compose import TEMPLATES
     logos = [l for l in comp.layers if l["kind"] == "logo"]
     if not logos:
         return CheckResult("Logo", ANOMALIE, "Aucun logo composé.")
     l = logos[0]
     problems = []
-    region = image.crop(l["bbox"]).convert("L")
-    bright = sum(1 for v in region.get_flattened_data() if v > 230) / max(1, region.width * region.height)
-    if file_sha256(asset_path(profile, l["file"])) != l["sha256"] or bright <= 0.15:
+    path = asset_path(profile, l["file"])
+    if file_sha256(path) != l["sha256"] or not logo_visible(image, l, path):
         problems.append("ressource modifiée ou logo non visible")
     W, H = image.size
     x0, y0, x1, y1 = l["bbox"]
-    actual = f"{'bas' if (y0 + y1) / 2 > H / 2 else 'haut'} à {'droite' if (x0 + x1) / 2 > W / 2 else 'gauche'}"
-    if actual != brief.logo_position:
-        problems.append(f"placé {actual} au lieu de {brief.logo_position}")
+    template = TEMPLATES.get(comp.template_id, {})
+    expected = template["logo_position"] if template.get("logo_fixed") else brief.logo_position
+    actual = logo_place(l["bbox"], image.size)
+    if actual != expected:
+        problems.append(f"placé {actual} au lieu de {expected}")
     if min(x0, y0, W - x1, H - y1) / W < 0.02:
         problems.append("trop près du bord")
     if problems:
