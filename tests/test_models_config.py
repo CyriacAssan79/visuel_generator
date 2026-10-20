@@ -26,3 +26,31 @@ def test_generated_size_keeps_area_for_every_format():
     assert generated_size((1440, 1440)) == (512, 512)
     assert generated_size((1080, 1350)) == (448, 576)   # avant : 384 × 512
     assert generated_size((1080, 1920)) == (384, 704)   # avant : 256 × 512
+
+
+def test_partial_photo_zones_reuse_usual_shapes():
+    """Zones photo partielles (affiche Bernabé, titre en haut) : pas de nouvelle forme à compiler."""
+    assert generated_size((1440, 835)) == (704, 384)
+    assert generated_size((1440, 1195)) == (576, 448)
+    assert generated_size((1080, 1594)) == (448, 576)
+
+
+def test_gpu_memory_error_releases_models_and_retries_once():
+    from komian.models_manager import ModelManager
+    manager, calls = ModelManager(), []
+
+    def ensure(state, size):
+        calls.append(state)
+        if len(calls) == 1:
+            raise RuntimeError("[GPU] Exceeded max size of memory allocation: Required 14745600 bytes")
+    manager._ensure_verifier = lambda: "verificateur"
+    manager._ensure = ensure
+    with manager.use("creation", (512, 512)) as pipes:
+        assert pipes["verifier"] == "verificateur"
+    assert calls == ["creation", "creation"]
+
+    manager._ensure = lambda state, size: (_ for _ in ()).throw(
+        RuntimeError("[GPU] ProgramBuilder build failed!"))
+    with pytest.raises(SourceUnavailable, match="Mémoire de la puce graphique saturée"):
+        with manager.use("creation", (512, 512)):
+            pass

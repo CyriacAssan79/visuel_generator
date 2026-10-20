@@ -1,4 +1,5 @@
 """Sources d'image de fond interchangeables : photo importée, formes géométriques, IA locale."""
+import math
 import random
 import uuid
 
@@ -118,10 +119,19 @@ def suggest_prompt(visual_direction: str, default_scene: str | None = None) -> s
     return f"{scene}, {PROMPT_STYLE}"
 
 
+GENERATION_SHAPES = ((512, 512), (448, 576), (384, 704), (576, 448), (704, 384))
+
+
 def generated_size(size, area: int = 512 * 512) -> tuple[int, int]:
-    """Taille de génération : même surface quel que soit le format (coût constant), au ratio du gabarit,
-    en multiples de 64. Carré 512 × 512, portrait 448 × 576, story 384 × 704."""
+    """Taille de génération : même surface quel que soit le format (coût constant), en multiples de 64.
+
+    Pour la surface par défaut, la taille est ramenée à l'une des 5 formes usuelles (carré 512 × 512, portrait
+    448 × 576, story 384 × 704, et leurs versions paysage), la plus proche du ratio de la zone photo ; le fond
+    est ensuite recadré à la zone. Chaque nouvelle forme oblige à recompiler le modèle sur la puce graphique :
+    en limiter le nombre évite de saturer sa mémoire (zones photo partielles, ex. affiche Bernabé)."""
     ratio = size[0] / size[1]
+    if area == 512 * 512:
+        return min(GENERATION_SHAPES, key=lambda s: abs(math.log((s[0] / s[1]) / ratio)))
     return tuple(max(64, round(v / 64) * 64) for v in ((area * ratio) ** 0.5, (area / ratio) ** 0.5))
 
 

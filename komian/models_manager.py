@@ -75,6 +75,13 @@ def _scheduler(g, spec: dict, folder: Path, name: str | None = None):
                                    getattr(g.Scheduler.Type, name))
 
 
+GPU_MEMORY_ERRORS = ("Exceeded max size of memory allocation", "ProgramBuilder build failed", "out of memory")
+
+
+def is_memory_error(exc: Exception) -> bool:
+    return isinstance(exc, (RuntimeError, MemoryError)) and any(m in str(exc) for m in GPU_MEMORY_ERRORS)
+
+
 class ModelManager:
     """Un état chargé à la fois ; le verrou empêche un échange pendant qu'une génération l'utilise."""
 
@@ -135,8 +142,25 @@ class ModelManager:
     def use(self, state: str, size):
         """Pipelines de l'état demandé (et le vérificateur), réservés pendant le bloc `with`."""
         with self._lock:
-            verifier = self._ensure_verifier()
-            self._ensure(state, size)
+            try:
+                verifier = self._ensure_verifier()
+                self._ensure(state, size)
+            except Exception as exc:
+                if not is_memory_error(exc):
+                    raise
+                # Mémoire de la puce graphique saturée (modèles d'anciens formats non libérés) :
+                # on libère tout, y compris le vérificateur, puis une seule nouvelle tentative.
+                self.release_all()
+                try:
+                    verifier = self._ensure_verifier()
+                    self._ensure(state, size)
+                except Exception as retry_exc:
+                    if is_memory_error(retry_exc):
+                        self.release_all()
+                        raise SourceUnavailable(
+                            "Mémoire de la puce graphique saturée : fermez les applications gourmandes "
+                            "(navigateur, Docker…) ou redémarrez le studio, puis relancez la création.") from retry_exc
+                    raise
             yield {**self._pipes, "verifier": verifier}
 
     def preload(self, state: str, size) -> threading.Thread:
