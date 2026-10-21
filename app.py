@@ -20,7 +20,7 @@ from komian.models import Brief
 from komian.storage import ImportRejected, import_image
 from komian.workflow import (ApprovalRefused, DeleteRefused, ExportBlocked, PlanBlocked, QualityNotApproved,
                              cancel_quality_approval, decide, delete_render, export_approved, generate,
-                             generate_variants, needs_quality_pass, prepare_plan)
+                             generate_variants, linked_versions, needs_quality_pass, prepare_plan)
 
 # --- Libellés affichés -----------------------------------------------------------
 OBJECTIVES = ["motiver", "promouvoir", "informer", "recruter", "sensibiliser", "autre"]
@@ -608,21 +608,25 @@ def page_validation():
 
 # --- Galerie ---------------------------------------------------------------------
 def delete_button(container, r, exported: bool) -> None:
-    """Suppression d'un visuel, après confirmation. Un visuel déjà téléchargé reste dans l'historique."""
-    if exported:
-        container.button("Supprimer", key=f"del_{r['id']}", width="stretch", disabled=True,
-                         help="Déjà téléchargé en version finale : conservé dans l'historique.")
-        return
+    """Suppression d'un visuel, après confirmation. Un visuel déjà téléchargé demande une confirmation explicite."""
     with container.popover("Supprimer", width="stretch"):
         st.markdown("**Supprimer ce visuel ?**")
         final = json.loads(r["params"]).get("quality_of")
         st.caption("Le fichier, ses contrôles et ses décisions sont effacés définitivement"
                    + (", ainsi que l'aperçu dont il est issu." if final else ".")
                    + (" Il est approuvé." if r["status"] == "approved" else ""))
+        if not exported:  # l'aperçu suit sa version finale si celle-ci a été téléchargée
+            with db.connect() as conn:
+                exported = any(db.is_exported(conn, v["id"]) for v in linked_versions(conn, r["id"]))
+        if exported:
+            st.warning("Ce visuel a déjà été téléchargé en version finale. Sa trace dans l'historique et sa copie "
+                       "exportée seront aussi effacées (les fichiers déjà téléchargés sur votre ordinateur restent).")
+            if not st.checkbox("Je confirme la suppression de l'historique", key=f"del_exp_{r['id']}"):
+                return
         if st.button("Supprimer définitivement", key=f"del_ok_{r['id']}", type="primary", width="stretch"):
             try:
                 with db.connect() as conn:
-                    removed = delete_render(conn, r["id"])
+                    removed = delete_render(conn, r["id"], include_exported=exported)
             except DeleteRefused as exc:
                 st.error(str(exc))
                 return

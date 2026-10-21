@@ -203,6 +203,10 @@ def test_delete_render_removes_file_and_records(conn):
     with pytest.raises(DeleteRefused):  # un visuel livré reste tracé
         delete_render(conn, ids[0])
     assert config.from_stored(db.get_render(conn, ids[0])["file_path"]).exists()
+    copy = config.from_stored(conn.execute("SELECT file_path FROM exports WHERE render_id = ?",
+                                           (ids[0],)).fetchone()["file_path"])
+    assert delete_render(conn, ids[0], include_exported=True) == [ids[0]]  # sur confirmation explicite
+    assert not copy.exists() and not db.is_exported(conn, ids[0])
 
 
 def test_delete_render_takes_quality_versions_and_keeps_shared_scene(conn, tmp_path, monkeypatch):

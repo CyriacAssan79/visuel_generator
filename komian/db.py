@@ -247,6 +247,13 @@ def exported_render_ids(conn) -> set[str]:
     return {r["render_id"] for r in conn.execute("SELECT DISTINCT render_id FROM exports")}
 
 
+def delete_exports(conn, render_id: str) -> list[str]:
+    """Efface la trace des exports d'un rendu. Renvoie les chemins des copies exportées (gérées par l'appelant)."""
+    paths = [r["file_path"] for r in conn.execute("SELECT file_path FROM exports WHERE render_id = ?", (render_id,))]
+    conn.execute("DELETE FROM exports WHERE render_id = ?", (render_id,))
+    return paths
+
+
 def delete_render_rows(conn, render_id: str) -> None:
     """Retire un rendu de la base, avec ses contrôles et décisions (les fichiers sont gérés par l'appelant)."""
     conn.execute("DELETE FROM checks WHERE render_id = ?", (render_id,))

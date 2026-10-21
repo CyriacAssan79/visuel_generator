@@ -395,20 +395,23 @@ def linked_versions(conn, render_id: str) -> list:
     return rows or [render]
 
 
-def delete_render(conn, render_id: str) -> list[str]:
+def delete_render(conn, render_id: str, include_exported: bool = False) -> list[str]:
     """Supprime un visuel de la galerie : fichier, contrôles, décisions, et ses versions liées (aperçu / finale).
 
-    Un visuel exporté n'est jamais supprimé : la trace de ce qui a été livré doit rester. Les scènes créées par
-    l'IA ne sont effacées que si plus aucun visuel ne les utilise (les variantes d'un lot partagent la même).
+    Un visuel exporté est conservé par défaut : la trace de ce qui a été livré doit rester. Avec
+    include_exported, l'utilisateur a confirmé : les exports et leurs copies sont effacés aussi. Les scènes créées
+    par l'IA ne sont effacées que si plus aucun visuel ne les utilise (les variantes d'un lot partagent la même).
     Renvoie les identifiants supprimés.
     """
     rows = linked_versions(conn, render_id)
-    if any(db.is_exported(conn, r["id"]) for r in rows):
+    if not include_exported and any(db.is_exported(conn, r["id"]) for r in rows):
         raise DeleteRefused("Ce visuel a déjà été téléchargé en version finale : il reste dans l'historique.")
     scenes = set()
     for r in rows:
         params = json.loads(r["params"])
         scenes.update(params[k] for k in ("scene_path", "scene_quality_path") if params.get(k))
+        for exported in db.delete_exports(conn, r["id"]):
+            from_stored(exported).unlink(missing_ok=True)
         db.delete_render_rows(conn, r["id"])
         if r["file_path"]:
             from_stored(r["file_path"]).unlink(missing_ok=True)
