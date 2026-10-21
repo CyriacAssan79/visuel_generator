@@ -59,6 +59,7 @@ htmlcov/
 venv/
 env/
 .conda/
+.streamlit/secrets.toml
 
 # --- Streamlit, secrets et configuration locale --------------------------------
 .streamlit/secrets.toml

@@ -413,8 +413,6 @@ def charte_panel(p) -> None:
                 x for x in [p.contact.whatsapp and f"WhatsApp {p.contact.whatsapp}", p.contact.phone,
                             p.contact.website] if x))
         st.markdown(html, unsafe_allow_html=True)
-        if p.unknowns:
-            st.warning(f"{len(p.unknowns)} point(s) de charte restent à confirmer.")
 
 
 def step_brief():
@@ -698,8 +696,7 @@ def white_logo(p):
 
 
 def charte_tag(p) -> str:
-    return ui.tag("charte validée", "ok") if not p.unknowns else ui.tag(f"{len(p.unknowns)} point(s) à confirmer",
-                                                                         "warn")
+    return ui.tag("charte validée", "ok") if not p.unknowns else ""
 
 
 def visible_renders(conn, b) -> list:
@@ -751,12 +748,6 @@ def client_sheet(b: str):
         select_client(b)
         st.session_state.step = 1
         st.switch_page(PAGES["create"])
-
-    if p.unknowns:
-        st.warning(f"**Charte à compléter.** {len(p.unknowns)} point(s) restent à confirmer : les visuels peuvent "
-                   "être créés, mais la conformité n'est pas garantie.")
-        with st.expander("Points à confirmer"):
-            st.markdown("\n".join(f"- {u}" for u in p.unknowns))
 
     primary = [c.hex for c in p.primary_colors.values()]
     left, right = st.columns([1.5, 1], gap="medium")
