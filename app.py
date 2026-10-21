@@ -9,8 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+from PIL import Image
 
-from komian import db, ui
+from komian import db, online, ui
 from komian.backgrounds import (SOURCES, GeometricSource, SourceUnavailable, ai_configured, model_spec,
                                 resolve_device, suggest_prompt)
 from komian.brands import asset_path, list_brands, load_profile
@@ -20,16 +21,21 @@ from komian.models import Brief
 from komian.storage import ImportRejected, import_image
 from komian.workflow import (ApprovalRefused, DeleteRefused, ExportBlocked, PlanBlocked, QualityNotApproved,
                              cancel_quality_approval, decide, delete_render, export_approved, generate,
-                             generate_variants, linked_versions, needs_quality_pass, prepare_plan)
+                             generate_variants, linked_versions, needs_quality_pass, prepare_plan,
+                             preview, CorrectionRefused, cell_label, correct_render, correction_state,
+                             faces_in_scene)
 
 # --- Libellés affichés -----------------------------------------------------------
 OBJECTIVES = ["motiver", "promouvoir", "informer", "recruter", "sensibiliser", "autre"]
 FORMAT_LABELS = {"post_carre": "Post carré", "post_portrait": "Post portrait", "story": "Story"}
 SOURCE_LABELS = {"photo": "Ma photo", "geometrique": "Formes aux couleurs de la marque",
-                 "ia_locale": "Image créée par l'IA"}
+                 "ia_en_ligne": "IA en ligne", "ia_locale": "IA locale"}
 SOURCE_HELP = {"photo": "Importez une photo libre de droits.",
                "geometrique": "Un fond graphique simple, en aplats de couleurs de la charte.",
-               "ia_locale": "Décrivez la scène : l'IA crée la photo, le texte et le logo sont ajoutés ensuite."}
+               "ia_en_ligne": "Décrivez la scène : l'IA en ligne crée la photo en quelques secondes, le texte et "
+                              "le logo sont ajoutés ensuite. Une création utilise un crédit du jour.",
+               "ia_locale": "Décrivez la scène : l'IA de ce poste crée la photo (environ 1 min 30), le texte et le "
+                            "logo sont ajoutés ensuite."}
 GEOMETRIC_VARIANTS = {"cercles": "Cercles", "diagonales": "Diagonales", "blocs": "Blocs"}
 CHECK_LABELS = {
     "Lisibilité (OCR)": "Relecture automatique du texte",
@@ -95,9 +101,10 @@ def superseded_ids(rows) -> set[str]:
     """Aperçus remplacés par une version qualité encore valable (ils ne sont plus proposés à la validation)."""
     ids = set()
     for r in rows:
-        source = json.loads(r["params"]).get("quality_of")
-        if source and r["status"] != "rejected":
-            ids.add(source)
+        params = json.loads(r["params"])
+        for source in (params.get("quality_of"), params.get("correction_of")):  # version qualité ou corrigée
+            if source and r["status"] != "rejected":
+                ids.add(source)
     return ids
 
 
@@ -114,7 +121,9 @@ if st.session_state.get("client") not in list_brands():
 brand_id = st.session_state.client
 profile = load_profile(brand_id)
 
+online_limit = int(online.config()["daily_limit"])
 with db.connect() as conn:
+    online_left = online.remaining(conn) if online.configured() else 0
     n_pending = sum(r["status"] == "pending" for r in reviewable(
         [r for r in db.list_renders(conn, brand_id) if r["status"] != "error"]))
 
@@ -218,6 +227,36 @@ def brief_form():
 
 
 # --- Créer un visuel : 2. Création -------------------------------------------------
+@st.cache_data(show_spinner=False, max_entries=200)
+def preview_png(brand: str, brief_json: str, template_id: str, layout: str, scale: float) -> bytes:
+    """Vignette de mise en page sur fond neutre (mise en cache : instantanée au deuxième affichage)."""
+    import io
+    comp = preview(load_profile(brand), Brief.model_validate_json(brief_json), template_id, layout, scale)
+    buf = io.BytesIO()
+    comp.image.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def layout_preview(brief, template_id: str, layouts: list, choice: str) -> None:
+    """Aperçu de la mise en page avant génération : la disposition choisie, ou toutes en vignettes."""
+    with st.container(key="card_preview"):
+        ui.label("Aperçu de la mise en page · avant génération")
+        data = brief.model_dump_json()
+        if choice != "auto" or len(layouts) == 1:
+            st.image(preview_png(brand_id, data, template_id, layouts[0] if choice == "auto" else choice, 0.45),
+                     width="stretch")
+            st.caption("Fond gris provisoire : l'image créée prendra sa place.")
+            return
+        st.caption("Dispositions possibles : le studio retiendra les 3 qui dégagent le mieux le sujet de l'image. "
+                   "Choisissez-en une à gauche pour la fixer.")
+        per_row = 4
+        for start in range(0, len(layouts), per_row):
+            cols = st.columns(per_row)
+            for col, lay in zip(cols, layouts[start:start + per_row]):
+                col.image(preview_png(brand_id, data, template_id, lay, 0.22), width="stretch")
+                col.caption(layout_label(lay))
+
+
 def step_creation():
     if not st.session_state.brief_id:
         st.info("Commencez par créer ou choisir un brief à l'étape 2.")
@@ -235,11 +274,20 @@ def step_creation():
         template_id = st.selectbox("Modèle de mise en page", [t for t in profile.templates if t in TEMPLATES],
                                    format_func=lambda t: TEMPLATES[t]["label"], label_visibility="collapsed")
 
+        layouts = TEMPLATES[template_id]["layouts"]
+        layout_choice = "auto"
+        if len(layouts) > 1:
+            layout_choice = st.selectbox(
+                "Disposition", ["auto"] + list(layouts), key=f"layout_{template_id}",
+                format_func=lambda l: "Le studio choisit (3 propositions)" if l == "auto" else layout_label(l),
+                help="L'aperçu à droite montre la mise en page avant de créer l'image. Avec une disposition "
+                     "choisie, l'IA laisse libre la zone du texte.")
+
         st.subheader("Image de fond")
         source_ids = list(SOURCES)
+        default_source = ("ia_en_ligne" if online_left > 0 else "ia_locale" if ai_configured() else "geometrique")
         source_id = st.radio("Image de fond", source_ids, horizontal=True, label_visibility="collapsed",
-                             format_func=lambda s: SOURCE_LABELS.get(s, s),
-                             index=source_ids.index("ia_locale" if ai_configured() else "geometrique"))
+                             format_func=lambda s: SOURCE_LABELS.get(s, s), index=source_ids.index(default_source))
         st.caption(SOURCE_HELP.get(source_id, ""))
 
         plan = prepare_plan(profile, brief, template_id, source_id)
@@ -269,7 +317,17 @@ def step_creation():
             if variant != "auto":
                 params["variant"] = variant
         else:
-            if not ai_configured():
+            if source_id == "ia_en_ligne":
+                if not online.configured():
+                    st.warning("La génération en ligne n'est pas configurée (identifiants Cloudflare absents).")
+                elif online_left <= 0:
+                    st.warning(f"Quota du jour atteint ({online_limit} images). Il se renouvelle à minuit : "
+                               "utilisez l'IA locale, une photo ou les formes de la marque.")
+                else:
+                    st.caption(f"1 crédit pour cette création · **{online_left} / {online_limit}** restants "
+                               "aujourd'hui. L'image validée est la version finale.")
+                    wait = " (quelques secondes)"
+            elif not ai_configured():
                 st.warning("La création d'image par IA n'est pas disponible sur ce poste.")
             else:
                 st.caption("L'IA crée la scène, vérifie le visage et le geste demandé, puis corrige si besoin. "
@@ -283,6 +341,9 @@ def step_creation():
                 "Décrivez la scène", suggest_prompt(brief.visual_direction, profile.default_scene), key=f"prompt_{row['id']}", height=110,
                 help="En français ou en anglais. Indiquez qui (âge, tenue), quoi (une action simple), où, le cadrage "
                      "et la lumière. N'écrivez ni texte ni logo : ils sont ajoutés ensuite.")
+            if source_id == "ia_en_ligne":
+                st.caption("Le studio précise automatiquement le contexte local, la zone à laisser libre pour le "
+                           "texte et le style photo.")
             with st.expander("Conseils pour une belle image", icon=":material/lightbulb:"):
                 st.markdown(
                     "- **Une personne en plan taille** qui regarde l'objectif donne les meilleurs résultats.\n"
@@ -294,11 +355,11 @@ def step_creation():
                     "- Le résultat ne convient pas ? **Relancez** : chaque création propose une nouvelle image.")
             params["saturation"] = st.slider("Intensité des couleurs", 0.0, 1.0, 1.0, 0.05, help="0 = noir et blanc")
 
-        n_layouts = len(TEMPLATES[template_id]["layouts"])
-        variants = st.toggle(f"Proposer {min(3, n_layouts)} mises en page au choix", value=n_layouts > 1,
-                             disabled=n_layouts < 2)
-        create = st.button("Créer le visuel", type="primary", disabled=bool(plan.blocking),
-                           icon=":material/auto_awesome:", width="stretch")
+        n_layouts = len(layouts)
+        variants = layout_choice == "auto" and n_layouts > 1
+        blocked = bool(plan.blocking) or (source_id == "ia_en_ligne" and (online_left <= 0 or not online.configured()))
+        create = st.button("Créer le visuel" + (" (1 crédit)" if source_id == "ia_en_ligne" else ""),
+                           type="primary", disabled=blocked, icon=":material/auto_awesome:", width="stretch")
 
     with right:
         if create:
@@ -308,26 +369,32 @@ def step_creation():
                         raise ImportRejected("Importez d'abord une photo.")
                     params["photo_path"] = to_stored(import_image(upload.getvalue(), upload.name, brand_id))
                 with st.spinner(f"Création du visuel en cours{wait}…"), db.connect() as conn:
-                    if variants and n_layouts > 1:
+                    if variants:
                         _, ids = generate_variants(conn, st.session_state.brief_id, template_id, source_id, params)
                     else:
-                        ids = [generate(conn, st.session_state.brief_id, template_id, source_id, params)]
+                        ids = [generate(conn, st.session_state.brief_id, template_id, source_id, params,
+                                        None if layout_choice == "auto" else layout_choice)]
                 st.session_state.render_id = ids[0]
                 st.session_state.last_batch = ids
+                st.rerun()  # compteurs de la barre latérale (crédits, visuels à valider) à jour
             except ImportRejected as exc:
                 st.error(f"Photo refusée : {exc}")
             except PlanBlocked as exc:
                 st.error(str(exc))
             except SourceUnavailable as exc:
-                st.error("La création d'image par IA n'est pas disponible sur ce poste pour le moment. "
-                         "Choisissez une autre image de fond, ou contactez l'administrateur.")
-                with st.expander("Détails pour l'administrateur"):
-                    st.code(str(exc), language=None)
+                if source_id == "ia_en_ligne":
+                    st.error(str(exc))
+                else:
+                    st.error("La création d'image par IA n'est pas disponible sur ce poste pour le moment. "
+                             "Choisissez une autre image de fond, ou contactez l'administrateur.")
+                    with st.expander("Détails pour l'administrateur"):
+                        st.code(str(exc), language=None)
             except Exception as exc:
                 st.error("La création a échoué. Réessayez ; si le problème persiste, contactez l'administrateur.")
                 with st.expander("Détails pour l'administrateur"):
                     st.code(f"{type(exc).__name__} : {exc}", language=None)
 
+        layout_preview(brief, template_id, layouts, layout_choice)
         made = []
         if st.session_state.last_batch:
             with db.connect() as conn:
@@ -340,8 +407,8 @@ def step_creation():
                     show_image(col, r["file_path"])
                     col.caption(layout_label(r["layout"]))
             else:
-                ui.label("Aperçu")
-                st.caption("Le visuel apparaîtra ici, aux couleurs de la charte du client.")
+                ui.label("Visuel")
+                st.caption("Le visuel créé apparaîtra ici, aux couleurs de la charte du client.")
         if made:
             st.success("Visuel prêt ! Choisissez et validez-le à l'étape de validation.")
             if st.button("Passer à la validation", type="primary", icon=":material/arrow_forward:"):
@@ -441,6 +508,75 @@ def page_create():
 
 
 # --- Validation ------------------------------------------------------------------
+def grid_overlay(scene_path) -> Image.Image | None:
+    """Scène de l'image (sans texte ni logo) avec la grille 3 × 3 numérotée, pour choisir la zone à corriger."""
+    from PIL import ImageDraw
+    path = from_stored(scene_path)
+    if not path or not path.exists():
+        return None
+    img = Image.open(path).convert("RGB")
+    img.thumbnail((720, 720))
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    for i in (1, 2):
+        draw.line([(w * i / 3, 0), (w * i / 3, h)], fill="white", width=3)
+        draw.line([(0, h * i / 3), (w, h * i / 3)], fill="white", width=3)
+    for r in range(3):
+        for c in range(3):
+            x, y = c * w / 3 + 10, r * h / 3 + 8
+            draw.rectangle((x - 4, y - 2, x + 26, y + 26), fill=(0, 0, 0))
+            draw.text((x + 4, y + 2), str(r * 3 + c + 1), fill="white", font_size=22)
+    return img
+
+
+def correction_panel(render, params: dict, checks) -> None:
+    """Correction ciblée : décrire le défaut, cocher la zone, 1 crédit, une seule fois (version finale)."""
+    if render["background_source"] != "ia_en_ligne":
+        return
+    with db.connect() as conn:
+        refusal = correction_state(conn, render)
+    if refusal:
+        if not params.get("correction_of") and render["status"] == "pending":
+            st.caption(refusal)
+        return
+    with st.expander(f"Corriger l'image (1 crédit · {online_left} / {online_limit} restants)",
+                     icon=":material/healing:"):
+        st.caption("Décrivez ce qui ne va pas et cochez la zone : seule cette partie de l'image est retouchée, le "
+                   "reste ne bouge pas. Une seule correction par visuel ; le résultat est la version finale.")
+        grid = grid_overlay(params.get("scene_path"))
+        if grid is not None:
+            st.image(grid, width="stretch")
+        defects = [f"{CHECK_LABELS.get(c['name'], c['name'])} : {c['detail']}" for c in checks
+                   if c["status"] != "conforme" and c["name"] in ("Visage", "Action demandée", "Tenue")]
+        instruction = st.text_area("Ce qui ne va pas", "\n".join(defects), key=f"fix_text_{render['id']}",
+                                   height=90, placeholder="Ex. : la main gauche a six doigts ; ajouter un casque "
+                                                          "blanc sur la tête ; enlever le seau à droite")
+        if f"fix_cells_{render['id']}" not in st.session_state:
+            scene = from_stored(params.get("scene_path"))
+            faces = faces_in_scene(Image.open(scene).convert("RGB")) if scene and scene.exists() else []
+            wants_face = any(w in instruction.lower() for w in ("visage", "tête", "tete", "yeux", "bouche"))
+            st.session_state[f"fix_cells_{render['id']}"] = [r * 3 + c + 1 for r, c in faces] if wants_face else []
+        numbers = st.pills("Zone à corriger", list(range(1, 10)), selection_mode="multi",
+                           key=f"fix_cells_{render['id']}",
+                           format_func=lambda n: f"{n} · {cell_label(((n - 1) // 3, (n - 1) % 3))}")
+        can_fix = online_left > 0 and bool(instruction.strip()) and bool(numbers)
+        if st.button("Corriger (1 crédit)", type="primary", icon=":material/healing:", disabled=not can_fix,
+                     key=f"fix_go_{render['id']}", width="stretch"):
+            try:
+                with st.spinner("Correction de la zone en cours…"), db.connect() as conn:
+                    new_id = correct_render(conn, render["id"], instruction,
+                                            [((n - 1) // 3, (n - 1) % 3) for n in numbers])
+            except (CorrectionRefused, SourceUnavailable) as exc:
+                st.error(str(exc))
+                return
+            st.session_state.render_id = new_id
+            st.session_state.flash = "Image corrigée : vérifiez la nouvelle version, puis approuvez-la."
+            st.rerun()
+        if online_left <= 0:
+            st.caption("Quota du jour atteint : la correction sera possible demain.")
+
+
+
 def client_filter() -> None:
     """Choix du client sur les pages Validation et Galerie (affiché dès qu'il y a plusieurs clients)."""
     brands = list_brands()
@@ -515,6 +651,10 @@ def page_validation():
             ui.status_badge(st, render["status"])
             if render_params.get("quality_of"):
                 st.caption("Version finale en haute qualité, créée à l'approbation de l'aperçu.")
+            if render_params.get("correction_of"):
+                fix = render_params.get("correction", {})
+                st.caption(f"Version corrigée (zone : {', '.join(cell_label(c) for c in fix.get('cells', []))}) — "
+                           f"« {fix.get('instruction', '')} ». C'est la version finale.")
             if st.session_state.get("check_notice"):
                 st.warning(st.session_state.pop("check_notice"))
             if approval:
@@ -539,6 +679,8 @@ def page_validation():
                 st.success("Tous les contrôles sont réussis.")
             with st.expander(f"{len(passed)} contrôle(s) réussi(s)", icon=":material/check:"):
                 st.markdown("\n".join(f"- {CHECK_LABELS.get(c['name'], c['name'])}" for c in passed))
+
+        correction_panel(render, render_params, checks)
 
         with st.form("decision"):
             st.subheader("Votre décision")
@@ -870,7 +1012,8 @@ page = st.navigation({"Production": [PAGES["create"], PAGES["validation"], PAGES
                       "Référentiel": [PAGES["clients"]]})
 
 with st.sidebar:
-    st.markdown(ui.engine_status(ai_configured()), unsafe_allow_html=True)
+    st.markdown(ui.engine_status(ai_configured(), (online_left, online_limit) if online.configured() else None),
+                unsafe_allow_html=True)
 
 with st.container(key="topbar"):
     c1, c2 = st.columns([3, 1])

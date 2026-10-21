@@ -307,11 +307,16 @@ def client_card(name: str, logo: Path | None, colors: list[str]) -> str:
     return f"<div class='k-client'>{logo_html}<div class='k-swatches'>{swatches}</div></div>"
 
 
-def engine_status(available: bool) -> str:
-    dot, text, sub = (("on", "Création d'images par IA", "Disponible sur ce poste") if available
-                      else ("warn", "Création d'images par IA", "Indisponible : fonds photo ou graphiques"))
-    return (f"<span class='k-label' style='color:var(--g600)'>Moteur de création</span>"
-            f"<div class='k-engine'><span class='k-dot {dot}'></span><div>{text}<small>{sub}</small></div></div>")
+def engine_status(available: bool, online: tuple[int, int] | None = None) -> str:
+    """État des moteurs : IA en ligne (crédits du jour) et IA locale."""
+    html = "<span class='k-label' style='color:var(--g600)'>Moteur de création</span>"
+    if online:
+        left, limit = online
+        dot = "on" if left > 0 else "warn"
+        sub = f"{left} / {limit} images restantes aujourd'hui" if left else "Quota du jour atteint · renouvelé à minuit"
+        html += f"<div class='k-engine'><span class='k-dot {dot}'></span><div>IA en ligne<small>{sub}</small></div></div>"
+    dot, sub = ("on", "Disponible sur ce poste") if available else ("warn", "Indisponible sur ce poste")
+    return html + f"<div class='k-engine'><span class='k-dot {dot}'></span><div>IA locale<small>{sub}</small></div></div>"
 
 
 def card_head(title: str, right: str = "") -> str:

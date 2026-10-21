@@ -353,7 +353,7 @@ def run_checks(path: Path, comp: Composition, brief: Brief, profile: BrandProfil
     results += [check_contrast(comp), check_logo(comp, image, brief, profile), check_colors(comp, image, profile)]
     if source_id == "geometrique" and background is not None:
         results.append(check_flat_background(background, profile))
-    if source_id in ("photo", "ia_locale") and background is not None:
+    if source_id in ("photo", "ia_locale", "ia_en_ligne") and background is not None:
         results.append(check_faces(comp, background, image.size))
     for icon in brief.icons:
         drawn = any(l["role"] == f"icone_{icon}" for l in comp.layers)
@@ -368,6 +368,11 @@ def run_checks(path: Path, comp: Composition, brief: Brief, profile: BrandProfil
                                        "Déclaration, non vérifiée par le système."))
         else:
             results.append(CheckResult("Droits de la photo", NON_CONCLUANT, "Droits d'utilisation non déclarés."))
+    if source_id == "ia_en_ligne":
+        gw, gh = params.get("generated_size", (0, 0))
+        results.append(CheckResult("Image générée par IA", NON_CONCLUANT,
+                                   "Vérifier à l'œil la netteté, les mains et l'absence de texte parasite.",
+                                   f"Modèle {params.get('model')} (en ligne), {gw}×{gh} px, graine {params.get('seed')}."))
     if source_id == "ia_locale":
         gw, gh = params.get("generated_size", (0, 0))
         results.append(CheckResult("Image générée par IA", NON_CONCLUANT,

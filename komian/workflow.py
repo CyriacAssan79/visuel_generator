@@ -10,11 +10,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from . import db
+from . import db, online
 from .backgrounds import SOURCES, GeometricSource, model_spec, save_scene, scene_to_background
 from .brands import file_sha256, load_profile, missing_assets
 from .checks import ANOMALIE, NON_CONCLUANT, run_checks
-from .compose import TEMPLATES, compose, layout_label, message_mask
+from .compose import TEMPLATES, compose, layout_label, message_bbox, message_mask
 from .config import DIRS, FORMATS, from_stored, safe_path
 from .models import BrandProfile, Brief
 from .saliency import FaceDetectionUnavailable, faces_on_canvas, saliency_map
@@ -110,7 +110,59 @@ def pick_variant(conn, brief: Brief, rng: random.Random) -> str:
     return rng.choice(variants)
 
 
-def _prepare(conn, brief_id, template_id, source_id, params):
+def neutral_background(size) -> Image.Image:
+    """Fond gris neutre de l'aperçu de mise en page (aucune image générée)."""
+    w, h = size
+    ramp = Image.linear_gradient("L").resize((w, h)).point(lambda v: 150 - round(v * 55 / 255))
+    return Image.merge("RGB", (ramp, ramp, ramp))
+
+
+def preview(profile: BrandProfile, brief: Brief, template_id: str, layout: str, scale: float = 1.0):
+    """Mise en page composée sur fond neutre, avant toute génération (instantané, gratuit).
+
+    `scale` < 1 compose une vignette : les tailles du gabarit sont relatives au format."""
+    w, h = FORMATS[brief.format_id]
+    size = (round(w * scale), round(h * scale))
+    return compose(profile, brief, size, template_id, neutral_background, layout)
+
+
+def _side(v: float) -> str:
+    return "left" if v < 0.45 else "right" if v > 0.55 else "center"
+
+
+def zone_hint(profile: BrandProfile, brief: Brief, template_id: str, layout: str | None) -> str:
+    """Consigne de cadrage pour l'IA, déduite de la mise en page : zone du texte à laisser calme, bandeau du bas.
+
+    Sans disposition choisie (plusieurs propositions), seul le bandeau est signalé."""
+    comp = preview(profile, brief, template_id, layout or TEMPLATES[template_id]["layouts"][0], 0.25)
+    W, H = comp.image.size
+    box = next((l["box"] for l in comp.layers if l.get("kind") == "background"), [0, 0, W, H])
+    bx, by, bw, bh = box
+    hints = []
+    if layout:
+        x0, y0, x1, y1 = message_bbox(comp)
+        cx, cy = ((x0 + x1) / 2 - bx) / bw, ((y0 + y1) / 2 - by) / bh
+        if 0 <= cy <= 1:
+            vertical = "top" if cy < 0.4 else "bottom" if cy > 0.6 else "middle"
+            horizontal = _side(cx)
+            where = f"{vertical} {horizontal}" if horizontal != "center" else f"{vertical} center"
+            opposite = {"left": "on the right side", "right": "on the left side"}.get(
+                horizontal, "below it" if vertical == "top" else "above it" if vertical == "bottom" else "to one side")
+            # « plain » ou « empty » produit une bande blanche vide : on demande un arrière-plan réel mais calme
+            hints.append(f"the photo fills the whole frame edge to edge; in the {where} area show only a calm, "
+                         "softly blurred part of the background (sky, wall or foliage), with no face or important "
+                         f"detail there; place the main subject {opposite}")
+    band = [l for l in comp.layers if l.get("role") == "bandeau"]
+    if band:
+        top = min(l["bbox"][1] if "bbox" in l else H * 0.77 for l in band)
+        share = max(0.0, min(1.0, (by + bh - top) / bh))
+        if share > 0.03:
+            hints.append(f"the bottom {round(share * 100)}% of the image will be covered by a banner: "
+                         "keep faces and the main subject above it")
+    return "; ".join(hints)
+
+
+def _prepare(conn, brief_id, template_id, source_id, params, layout=None):
     row, brief = db.get_brief(conn, brief_id)
     profile = load_profile(brief.brand_id)
     plan = prepare_plan(profile, brief, template_id, source_id)
@@ -121,6 +173,9 @@ def _prepare(conn, brief_id, template_id, source_id, params):
         rng = random.Random()
         params.setdefault("variant", pick_variant(conn, brief, rng))
         params.setdefault("seed", rng.randrange(10**9))
+    if source_id == "ia_en_ligne":
+        online.check_quota(conn)
+        params["zone_hint"] = zone_hint(profile, brief, template_id, layout)
     source = SOURCES[source_id]
     cache: dict = {}
 
@@ -128,6 +183,9 @@ def _prepare(conn, brief_id, template_id, source_id, params):
         """Le fond est produit une seule fois par taille, puis partagé par toutes les dispositions."""
         if size not in cache:
             cache[size] = source.make(size, profile, params)
+            if source_id == "ia_en_ligne":  # une image facturée : comptée dès qu'elle est reçue
+                online.record_use(conn, "creation", params["model"])
+                conn.commit()
         return cache[size]
 
     return row, brief, profile, plan, params, background, cache
@@ -162,7 +220,8 @@ def generate(conn, brief_id: int, template_id: str, source_id: str, params: dict
              layout: str | None = None) -> str:
     """Un rendu, dans une disposition donnée (la première du gabarit par défaut)."""
     started = time.perf_counter()
-    row, brief, profile, plan, params, background, cache = _prepare(conn, brief_id, template_id, source_id, params)
+    row, brief, profile, plan, params, background, cache = _prepare(conn, brief_id, template_id, source_id, params,
+                                                                    layout)
     try:
         comp = compose(profile, brief, FORMATS[brief.format_id], template_id, background, layout)
     except Exception as exc:
@@ -389,9 +448,11 @@ class DeleteRefused(RuntimeError):
 def linked_versions(conn, render_id: str) -> list:
     """Le visuel et ses versions liées : l'aperçu et sa (ses) version(s) finale(s) en haute qualité."""
     render = db.get_render(conn, render_id)
-    preview_id = json.loads(render["params"]).get("quality_of") or render_id
+    params = json.loads(render["params"])
+    root = params.get("quality_of") or params.get("correction_of") or render_id
     rows = [r for r in db.list_renders(conn)
-            if r["id"] == preview_id or json.loads(r["params"]).get("quality_of") == preview_id]
+            if r["id"] == root or root in (json.loads(r["params"]).get("quality_of"),
+                                           json.loads(r["params"]).get("correction_of"))]
     return rows or [render]
 
 
@@ -422,6 +483,150 @@ def delete_render(conn, render_id: str, include_exported: bool = False) -> list[
     for scene in scenes - still_used:
         from_stored(scene).unlink(missing_ok=True)
     return [r["id"] for r in rows]
+
+
+# --- Correction ciblée --------------------------------------------------------------
+# Grille 3 × 3 posée sur la scène : (ligne, colonne), ligne 0 = haut, colonne 0 = gauche.
+GRID_ROWS, GRID_COLS = ("haut", "milieu", "bas"), ("gauche", "centre", "droite")
+CORRECTION_MARGIN = 0.12      # contexte autour de la zone envoyée au modèle (part de la taille de l'image)
+CORRECTION_INPUT_MAX = 504    # Cloudflare : images d'entrée strictement plus petites que 512 × 512
+CORRECTABLE_SOURCES = ("ia_en_ligne",)
+
+
+class CorrectionRefused(RuntimeError):
+    pass
+
+
+def cell_label(cell) -> str:
+    r, c = cell
+    return f"{GRID_ROWS[r]} {GRID_COLS[c]}" if (r, c) != (1, 1) else "centre"
+
+
+def cells_box(cells, size) -> tuple[int, int, int, int]:
+    """Rectangle (pixels) couvrant les cases cochées de la grille 3 × 3."""
+    w, h = size
+    rows, cols = [r for r, _ in cells], [c for _, c in cells]
+    return (round(min(cols) * w / 3), round(min(rows) * h / 3), round((max(cols) + 1) * w / 3),
+            round((max(rows) + 1) * h / 3))
+
+
+def correction_state(conn, render) -> str | None:
+    """Pourquoi ce visuel ne peut pas être corrigé (None s'il le peut)."""
+    params = json.loads(render["params"])
+    if render["background_source"] not in CORRECTABLE_SOURCES or not params.get("scene_path"):
+        return "La correction ciblée concerne les images créées par l'IA en ligne."
+    if params.get("correction_of"):
+        return "Ce visuel est déjà une version corrigée : une seule correction par visuel."
+    if any(json.loads(r["params"]).get("correction_of") == render["id"] for r in db.list_renders(conn)):
+        return "Ce visuel a déjà été corrigé une fois."
+    if render["status"] != "pending":
+        return "Seul un visuel en attente de validation peut être corrigé."
+    return None
+
+
+def faces_in_scene(scene: Image.Image) -> list[tuple[int, int]]:
+    """Cases de la grille qui contiennent un visage détecté (pour les présélectionner)."""
+    from .saliency import detect_faces
+    try:
+        faces = detect_faces(scene)
+    except FaceDetectionUnavailable:
+        return []
+    w, h = scene.size
+    cells = set()
+    for x0, y0, x1, y1, _ in faces:
+        y0 -= (y1 - y0) * 0.6  # le haut de la tête (cheveux, casque) dépasse du visage détecté
+        for r in range(3):
+            for c in range(3):
+                if x0 < (c + 1) * w / 3 and x1 > c * w / 3 and y0 < (r + 1) * h / 3 and y1 > r * h / 3:
+                    cells.add((r, c))
+    return sorted(cells)
+
+
+def correction_prompt(instruction_en: str, profile: BrandProfile) -> str:
+    return (f"Edit image 0: {instruction_en.strip().rstrip('.')}. Change only what is asked; keep everything else "
+            "exactly the same: same framing, same people, same pose, same lighting and colors. "
+            + online.build_prompt("", profile).lstrip(". "))
+
+
+def patch_scene(scene: Image.Image, cells, edit_fn) -> tuple[Image.Image, dict]:
+    """Retouche d'une zone : la zone (avec un peu de contexte) est envoyée à `edit_fn`, puis seules les cases
+    cochées sont recollées sur la scène d'origine, avec un fondu. Le reste de l'image est garanti identique."""
+    from PIL import ImageDraw, ImageFilter
+    W, H = scene.size
+    zx0, zy0, zx1, zy1 = cells_box(cells, scene.size)
+    m = round(max(W, H) * CORRECTION_MARGIN)
+    crop_box = (max(0, zx0 - m), max(0, zy0 - m), min(W, zx1 + m), min(H, zy1 + m))
+    crop = scene.crop(crop_box)
+    k = CORRECTION_INPUT_MAX / max(crop.size)
+    small = crop.resize((max(16, round(crop.width * k)), max(16, round(crop.height * k))), Image.Resampling.LANCZOS)
+    out_size = online.generation_size(crop.size)
+    edited = edit_fn(small, out_size).resize(crop.size, Image.Resampling.LANCZOS)
+    # Masque : toute la zone envoyée, fondue sur ses bords intérieurs (pas de coupure nette au milieu d'un objet) ;
+    # les bords qui touchent le bord de l'image restent pleins.
+    cw, ch = crop.size
+    inset = m / 2
+    x0, y0, x1, y1 = crop_box
+    mask = Image.new("L", crop.size, 0)
+    ImageDraw.Draw(mask).rectangle((0 if x0 == 0 else inset, 0 if y0 == 0 else inset,
+                                    cw if x1 == W else cw - inset, ch if y1 == H else ch - inset), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(max(2, m / 5)))
+    if x0 == 0 or y0 == 0 or x1 == W or y1 == H:  # le flou ne doit pas atténuer les bords de l'image
+        full = Image.new("L", crop.size, 0)
+        ImageDraw.Draw(full).rectangle((0 if x0 == 0 else inset * 1.6, 0 if y0 == 0 else inset * 1.6,
+                                        cw if x1 == W else cw - inset * 1.6, ch if y1 == H else ch - inset * 1.6),
+                                       fill=255)
+        mask = Image.fromarray(np.maximum(np.asarray(mask), np.asarray(full)))
+    result = scene.copy()
+    result.paste(edited, crop_box[:2], mask)
+    return result, {"crop_box": list(crop_box), "zone": [zx0, zy0, zx1, zy1], "model_size": list(out_size),
+                    "input_size": list(small.size)}
+
+
+def correct_render(conn, render_id: str, instruction: str, cells, edit_fn=None) -> str:
+    """Correction ciblée d'un visuel créé en ligne : 1 crédit, une seule fois, le résultat est la version finale.
+
+    La zone cochée est retouchée par le modèle de correction (FLUX.2 Klein 9B) d'après la consigne, recollée sur la
+    scène d'origine, puis la même mise en page est recomposée et tous les contrôles sont relancés. L'original reste
+    dans l'historique, masqué tant que la version corrigée n'est pas rejetée."""
+    started = time.perf_counter()
+    render = db.get_render(conn, render_id)
+    refusal = correction_state(conn, render)
+    if refusal:
+        raise CorrectionRefused(refusal)
+    if not instruction.strip():
+        raise CorrectionRefused("Décrivez ce qui ne va pas.")
+    cells = sorted({(int(r), int(c)) for r, c in cells})
+    if not cells:
+        raise CorrectionRefused("Cochez au moins une zone de l'image à corriger.")
+    online.check_quota(conn)
+    params = json.loads(render["params"])
+    row, brief = db.get_brief(conn, render["brief_id"])
+    profile = load_profile(brief.brand_id)
+    plan = prepare_plan(profile, brief, render["template_id"], render["background_source"])
+    scene = Image.open(from_stored(params["scene_path"])).convert("RGB")
+    from .translate import translate_prompt
+    instruction_en, _ = translate_prompt(instruction)
+    model = online.config()["correction_model"]
+    prompt = correction_prompt(instruction_en, profile)
+    seed = random.randrange(10**9)
+    edit_fn = edit_fn or (lambda image, size: online.generate_image(prompt, size, seed, model, reference=image))
+    new_scene, info = patch_scene(scene, cells, edit_fn)
+    online.record_use(conn, "correction", model)
+    conn.commit()
+    base = {k: v for k, v in params.items() if k not in ("layers", "layout", "plan_warnings")}
+    new_params = {**base, "scene_path": save_scene(new_scene), "correction_of": render_id,
+                  "correction": {"instruction": instruction, "instruction_en": instruction_en, "prompt": prompt,
+                                 "cells": cells, "model": model, "seed": seed, **info}}
+    cache: dict = {}
+
+    def background(s):
+        if s not in cache:
+            cache[s] = scene_to_background(new_scene, s, new_params)
+        return cache[s]
+
+    comp = compose(profile, brief, FORMATS[brief.format_id], render["template_id"], background, render["layout"])
+    return _save(conn, row, brief, profile, plan, render["template_id"], render["background_source"], new_params,
+                 comp, next(iter(cache.values())), started, render["batch_id"])
 
 
 def export_approved(conn, render_id: str) -> Path:

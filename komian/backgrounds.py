@@ -184,4 +184,30 @@ class DiffusionSource:
         return scene_to_background(scene, size, params)
 
 
-SOURCES = {s.id: s for s in (PhotoSource(), GeometricSource(), DiffusionSource())}
+class OnlineSource:
+    """Scène créée en ligne (Cloudflare Workers AI, FLUX.2), une seule image par création.
+
+    La consigne est traduite puis enrichie (contexte du marché, zone laissée libre pour le texte, style photo).
+    L'image est déjà de bonne qualité : pas de passage en qualité à l'approbation. Le quota est vérifié et compté
+    par le workflow (komian/workflow.py), qui dispose de la connexion à la base."""
+    id = "ia_en_ligne"
+    label = "IA en ligne (Cloudflare Workers AI)"
+
+    def make(self, size, profile: BrandProfile, params: dict) -> Image.Image:
+        from . import online
+        if not params.get("prompt", "").strip():
+            raise ValueError("Description de la scène (prompt) obligatoire pour la source IA.")
+        cfg = online.config()
+        gw, gh = online.generation_size(size)
+        params.setdefault("seed", random.randrange(10**9))
+        prompt_en, translated = translate_prompt(params["prompt"])
+        full = online.build_prompt(prompt_en, profile, params.get("zone_hint", ""))
+        params.update({"model": cfg["model"], "provider": "cloudflare", "generated_size": [gw, gh],
+                       "prompt_en": prompt_en, "prompt_full": full,
+                       "translation": TRANSLATION_MODEL if translated else None})
+        scene = online.generate_image(full, (gw, gh), params["seed"], cfg["model"])
+        params["scene_path"] = save_scene(scene)
+        return scene_to_background(scene, size, params)
+
+
+SOURCES = {s.id: s for s in (PhotoSource(), GeometricSource(), OnlineSource(), DiffusionSource())}

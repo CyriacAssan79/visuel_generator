@@ -123,7 +123,7 @@ def whatsapp_icon(c, canvas, center, d):
     tile = tile.resize((round(d), round(d)), Image.Resampling.LANCZOS)
     x, y = round(center[0] - d / 2), round(center[1] - d / 2)
     canvas.paste(tile, (x, y), tile)
-    c.layers.append({"kind": "shape", "role": "icone_whatsapp", "color_name": "blanc", "color": WHITE,
+    c.layers.append({"kind": "shape", "role": "picto_whatsapp", "color_name": "blanc", "color": WHITE,
                      "bbox": (x, y, x + round(d), y + round(d)), "sample_points": []})
 
 
